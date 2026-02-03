@@ -93,11 +93,61 @@ export function formatNumber(num: number): string {
   return num.toLocaleString('en-US');
 }
 
-// Validate numeric answer
-export function validateNumericAnswer(userAnswer: string, correctAnswer: number): boolean {
-  const normalized = userAnswer.trim().replace(/\s/g, '').replace(/,/g, '');
-  const userNum = parseFloat(normalized);
-  return Math.abs(userNum - correctAnswer) < 0.001;
+// Normalize and validate numeric answer
+// Handles: $5, 5.00, 5, 3/4, 0.75, etc.
+export function normalizeAnswer(userAnswer: string, correctAnswer: string | number): boolean {
+  const normalized = userAnswer.toString().trim().toLowerCase();
+  const correct = correctAnswer.toString().trim().toLowerCase();
+  
+  // Direct match
+  if (normalized === correct) return true;
+  
+  // Remove common prefixes/suffixes and compare
+  const cleanUser = normalized
+    .replace(/^\$/, '')
+    .replace(/\$$/, '')
+    .replace(/,/g, '')
+    .replace(/\s/g, '');
+  
+  const cleanCorrect = correct
+    .replace(/^\$/, '')
+    .replace(/\$$/, '')
+    .replace(/,/g, '')
+    .replace(/\s/g, '');
+  
+  if (cleanUser === cleanCorrect) return true;
+  
+  // Try numeric comparison
+  const userNum = parseFloat(cleanUser);
+  const correctNum = parseFloat(cleanCorrect);
+  
+  if (!isNaN(userNum) && !isNaN(correctNum)) {
+    // Allow small floating point differences
+    return Math.abs(userNum - correctNum) < 0.001;
+  }
+  
+  // Handle fractions like "3/4"
+  const userFracMatch = cleanUser.match(/^(-?\d+)\/(-?\d+)$/);
+  const correctFracMatch = cleanCorrect.match(/^(-?\d+)\/(-?\d+)$/);
+  
+  if (userFracMatch && correctFracMatch) {
+    const userNum = parseInt(userFracMatch[1]) / parseInt(userFracMatch[2]);
+    const correctNum = parseInt(correctFracMatch[1]) / parseInt(correctFracMatch[2]);
+    return Math.abs(userNum - correctNum) < 0.001;
+  }
+  
+  // If user entered decimal and correct is fraction (or vice versa)
+  if (userFracMatch && !isNaN(correctNum)) {
+    const userVal = parseInt(userFracMatch[1]) / parseInt(userFracMatch[2]);
+    return Math.abs(userVal - correctNum) < 0.001;
+  }
+  
+  if (correctFracMatch && !isNaN(userNum)) {
+    const correctVal = parseInt(correctFracMatch[1]) / parseInt(correctFracMatch[2]);
+    return Math.abs(userNum - correctVal) < 0.001;
+  }
+  
+  return false;
 }
 
 // Get grade from percentage
