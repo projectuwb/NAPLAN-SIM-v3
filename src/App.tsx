@@ -1,13 +1,15 @@
 import { useState, useEffect } from 'react';
-import type { Question, TestMode, TestResult, TestState } from '@/types';
+import type { Question, TestMode, TestResult, TestState, StoredTest } from '@/types';
 import { generateTest } from '@/lib/questions';
-import { formatTime, saveToStorage, loadFromStorage, removeFromStorage, calculateScore, getGrade, getFeedback, validateNumericAnswer } from '@/lib/utils';
+import { formatTime, saveToStorage, loadFromStorage, removeFromStorage, calculateScore, getGrade, getFeedback, normalizeAnswer } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
 import { Input } from '@/components/ui/input';
-import { Timer, Calculator, BookOpen, ChevronLeft, ChevronRight, Check, X, RotateCcw, Home, Trophy, AlertCircle } from 'lucide-react';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Timer, Calculator, BookOpen, ChevronLeft, ChevronRight, Check, X, RotateCcw, Home, Trophy, AlertCircle, Trash2, History } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 
 // Import diagram components
 import { 
@@ -23,7 +25,7 @@ import {
   Spinner,
 } from '@/components/diagrams';
 
-type AppView = 'home' | 'test' | 'review' | 'results';
+type AppView = 'home' | 'test' | 'review' | 'results' | 'history';
 
 const TEST_DURATION = 40 * 60; // 40 minutes in seconds
 const STORAGE_KEY = 'naplan-test-state';
@@ -35,29 +37,34 @@ function App() {
   const [questions, setQuestions] = useState<Question[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [timeRemaining, setTimeRemaining] = useState(TEST_DURATION);
-  const [answers, setAnswers] = useState<Record<string, string | number>>({});
+  const [answers, setAnswers] = useState<Record<string, string>>({});
   const [isTestComplete, setIsTestComplete] = useState(false);
   const [testResult, setTestResult] = useState<TestResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [numericInput, setNumericInput] = useState('');
+  
+  // Test history state
+  const [testHistory, setTestHistory] = useState<StoredTest[]>([]);
+  const [selectedTests, setSelectedTests] = useState<Set<string>>(new Set());
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [reviewingTest, setReviewingTest] = useState<StoredTest | null>(null);
+  
+  // In-progress tests state
+  const [inProgressTests, setInProgressTests] = useState<{nonCalculator: boolean; calculator: boolean}>({nonCalculator: false, calculator: false});
 
-  // Load saved test state on mount
+  // Load saved data on mount
   useEffect(() => {
+    // Load test history
+    const history = loadFromStorage<StoredTest[]>(RESULTS_KEY, []);
+    setTestHistory(history);
+    
+    // Check for in-progress tests
     const savedState = loadFromStorage<TestState | null>(STORAGE_KEY, null);
     if (savedState && !savedState.isComplete) {
-      // Restore test state
-      setTestMode(savedState.mode);
-      setQuestions(savedState.questions);
-      setCurrentIndex(savedState.currentQuestionIndex);
-      setTimeRemaining(savedState.timeRemaining);
-      const savedAnswers: Record<string, string | number> = {};
-      savedState.questions.forEach(q => {
-        if (q.userAnswer !== undefined) {
-          savedAnswers[q.id] = q.userAnswer;
-        }
+      setInProgressTests({
+        nonCalculator: savedState.mode === 'non-calculator',
+        calculator: savedState.mode === 'calculator'
       });
-      setAnswers(savedAnswers);
-      setView('test');
     }
   }, []);
 
@@ -90,6 +97,10 @@ function App() {
         startTime: Date.now(),
       };
       saveToStorage(STORAGE_KEY, state);
+      setInProgressTests({
+        nonCalculator: testMode === 'non-calculator',
+        calculator: testMode === 'calculator'
+      });
     }
   }, [view, questions, answers, currentIndex, timeRemaining, isTestComplete, testMode]);
 
@@ -109,11 +120,35 @@ function App() {
       setIsTestComplete(false);
       setNumericInput('');
       setView('test');
-      removeFromStorage(STORAGE_KEY);
     } catch (err) {
       setError('An error occurred while starting the test.');
       console.error(err);
     }
+  };
+
+  const resumeTest = () => {
+    const savedState = loadFromStorage<TestState | null>(STORAGE_KEY, null);
+    if (savedState && !savedState.isComplete) {
+      setTestMode(savedState.mode);
+      setQuestions(savedState.questions);
+      setCurrentIndex(savedState.currentQuestionIndex);
+      setTimeRemaining(savedState.timeRemaining);
+      const savedAnswers: Record<string, string> = {};
+      savedState.questions.forEach(q => {
+        if (q.userAnswer !== undefined) {
+          savedAnswers[q.id] = String(q.userAnswer);
+        }
+      });
+      setAnswers(savedAnswers);
+      setIsTestComplete(false);
+      setNumericInput(savedAnswers[savedState.questions[savedState.currentQuestionIndex]?.id] || '');
+      setView('test');
+    }
+  };
+
+  const cancelTest = () => {
+    removeFromStorage(STORAGE_KEY);
+    setInProgressTests({nonCalculator: false, calculator: false});
   };
 
   const completeTest = () => {
@@ -121,15 +156,13 @@ function App() {
     
     // Calculate results
     const questionResults = questions.map(q => {
-      const userAnswer = answers[q.id];
+      const userAnswer = answers[q.id] || '';
       let correct = false;
       
       if (q.answerFormat === 'multiple-choice') {
         correct = userAnswer === q.correctAnswer;
       } else {
-        correct = typeof userAnswer === 'string' 
-          ? validateNumericAnswer(userAnswer, q.correctAnswer as number)
-          : userAnswer === q.correctAnswer;
+        correct = normalizeAnswer(userAnswer, q.correctAnswer);
       }
       
       return {
@@ -137,7 +170,7 @@ function App() {
         questionType: q.type,
         correct,
         userAnswer,
-        correctAnswer: q.correctAnswer,
+        correctAnswer: String(q.correctAnswer),
       };
     });
     
@@ -155,22 +188,32 @@ function App() {
     setTestResult(result);
     
     // Save to history
-    const history = loadFromStorage<TestResult[]>(RESULTS_KEY, []);
-    history.push(result);
-    saveToStorage(RESULTS_KEY, history.slice(-10)); // Keep last 10 results
+    const newTest: StoredTest = {
+      id: Date.now().toString(),
+      result,
+    };
+    const history = loadFromStorage<StoredTest[]>(RESULTS_KEY, []);
+    const updatedHistory = [newTest, ...history];
+    saveToStorage(RESULTS_KEY, updatedHistory);
+    setTestHistory(updatedHistory);
     
     removeFromStorage(STORAGE_KEY);
+    setInProgressTests({
+      nonCalculator: false,
+      calculator: false
+    });
     setView('results');
   };
 
-  const handleAnswer = (answer: string | number) => {
-    setAnswers(prev => ({ ...prev, [questions[currentIndex].id]: answer }));
+  const handleAnswer = (answer: string) => {
+    if (questions[currentIndex]) {
+      setAnswers(prev => ({ ...prev, [questions[currentIndex].id]: answer }));
+    }
   };
 
   const handleNumericSubmit = () => {
-    if (numericInput.trim()) {
+    if (numericInput.trim() && questions[currentIndex]) {
       handleAnswer(numericInput.trim());
-      setNumericInput('');
     }
   };
 
@@ -178,7 +221,40 @@ function App() {
     if (index >= 0 && index < questions.length) {
       setCurrentIndex(index);
       const q = questions[index];
-      setNumericInput(typeof answers[q.id] === 'string' ? (answers[q.id] as string) : '');
+      setNumericInput(answers[q.id] || '');
+    }
+  };
+
+  const deleteSelectedTests = () => {
+    const updatedHistory = testHistory.filter(t => !selectedTests.has(t.id));
+    saveToStorage(RESULTS_KEY, updatedHistory);
+    setTestHistory(updatedHistory);
+    setSelectedTests(new Set());
+    setShowDeleteDialog(false);
+  };
+
+  const deleteAllTests = () => {
+    saveToStorage(RESULTS_KEY, []);
+    setTestHistory([]);
+    setSelectedTests(new Set());
+    setShowDeleteDialog(false);
+  };
+
+  const toggleTestSelection = (id: string) => {
+    const newSelected = new Set(selectedTests);
+    if (newSelected.has(id)) {
+      newSelected.delete(id);
+    } else {
+      newSelected.add(id);
+    }
+    setSelectedTests(newSelected);
+  };
+
+  const selectAllTests = () => {
+    if (selectedTests.size === testHistory.length) {
+      setSelectedTests(new Set());
+    } else {
+      setSelectedTests(new Set(testHistory.map(t => t.id)));
     }
   };
 
@@ -288,8 +364,9 @@ function App() {
           </Alert>
         )}
 
-        <div className="grid md:grid-cols-2 gap-6">
-          <Card className="hover:shadow-lg transition-shadow cursor-pointer" onClick={() => startTest('non-calculator')}>
+        <div className="grid md:grid-cols-2 gap-6 mb-6">
+          {/* Non-Calculator Card */}
+          <Card className="hover:shadow-lg transition-shadow">
             <CardHeader className="text-center">
               <div className="mx-auto w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mb-4">
                 <BookOpen className="w-8 h-8 text-blue-600" />
@@ -298,14 +375,28 @@ function App() {
             </CardHeader>
             <CardContent className="text-center">
               <p className="text-slate-600 mb-4">40 minutes • 32 questions</p>
-              <p className="text-sm text-slate-500">
-                Test your mental math skills with questions on number, algebra, measurement, and geometry.
-              </p>
-              <Button className="mt-4 w-full">Start Test</Button>
+              
+              {inProgressTests.nonCalculator ? (
+                <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 mb-4">
+                  <p className="text-amber-800 font-medium mb-2">Test in Progress</p>
+                  <div className="flex gap-2 justify-center">
+                    <Button size="sm" onClick={resumeTest}>Resume Test</Button>
+                    <Button size="sm" variant="outline" onClick={cancelTest}>Cancel</Button>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <p className="text-sm text-slate-500 mb-4">
+                    Test your mental math skills with questions on number, algebra, measurement, and geometry.
+                  </p>
+                  <Button className="w-full" onClick={() => startTest('non-calculator')}>Start Test</Button>
+                </>
+              )}
             </CardContent>
           </Card>
 
-          <Card className="hover:shadow-lg transition-shadow cursor-pointer" onClick={() => startTest('calculator')}>
+          {/* Calculator Card */}
+          <Card className="hover:shadow-lg transition-shadow">
             <CardHeader className="text-center">
               <div className="mx-auto w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mb-4">
                 <Calculator className="w-8 h-8 text-green-600" />
@@ -314,15 +405,36 @@ function App() {
             </CardHeader>
             <CardContent className="text-center">
               <p className="text-slate-600 mb-4">40 minutes • 32 questions</p>
-              <p className="text-sm text-slate-500">
-                Use your calculator for more complex problems including statistics and probability.
-              </p>
-              <Button className="mt-4 w-full">Start Test</Button>
+              
+              {inProgressTests.calculator ? (
+                <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 mb-4">
+                  <p className="text-amber-800 font-medium mb-2">Test in Progress</p>
+                  <div className="flex gap-2 justify-center">
+                    <Button size="sm" onClick={resumeTest}>Resume Test</Button>
+                    <Button size="sm" variant="outline" onClick={cancelTest}>Cancel</Button>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <p className="text-sm text-slate-500 mb-4">
+                    Use your calculator for more complex problems including statistics and probability.
+                  </p>
+                  <Button className="w-full" onClick={() => startTest('calculator')}>Start Test</Button>
+                </>
+              )}
             </CardContent>
           </Card>
         </div>
 
-        <div className="mt-8 text-center">
+        {/* Test History Button */}
+        <div className="text-center">
+          <Button variant="outline" onClick={() => setView('history')} className="mb-4">
+            <History className="w-4 h-4 mr-2" />
+            Test History ({testHistory.length} tests)
+          </Button>
+        </div>
+
+        <div className="mt-4 text-center">
           <p className="text-sm text-slate-500">
             This is a practice tool. Actual NAPLAN tests may differ in format and content.
           </p>
@@ -392,11 +504,12 @@ function App() {
               {currentQuestion.answerFormat === 'multiple-choice' ? (
                 <div className="space-y-3">
                   {currentQuestion.options?.map((option, i) => {
-                    const isSelected = answers[currentQuestion.id] === option.charAt(0);
+                    const optionLetter = option.charAt(0);
+                    const isSelected = answers[currentQuestion.id] === optionLetter;
                     return (
                       <button
-                        key={i}
-                        onClick={() => handleAnswer(option.charAt(0))}
+                        key={`${currentQuestion.id}-${i}`}
+                        onClick={() => handleAnswer(optionLetter)}
                         className={`w-full text-left p-4 rounded-lg border-2 transition-all ${
                           isSelected 
                             ? 'border-blue-500 bg-blue-50' 
@@ -413,11 +526,12 @@ function App() {
                   <div className="flex gap-2">
                     <Input
                       type="text"
-                      placeholder="Enter your answer"
+                      placeholder="Type your answer here"
                       value={numericInput}
                       onChange={(e) => setNumericInput(e.target.value)}
                       onKeyDown={(e) => e.key === 'Enter' && handleNumericSubmit()}
-                      className="flex-1"
+                      className="flex-1 text-lg"
+                      autoFocus
                     />
                     <Button onClick={handleNumericSubmit}>Submit</Button>
                   </div>
@@ -426,51 +540,9 @@ function App() {
                       Answer saved: {answers[currentQuestion.id]}
                     </p>
                   )}
-                  
-                  {/* Virtual Numpad for mobile */}
-                  <div className="grid grid-cols-4 gap-2 mt-4">
-                    {['7', '8', '9', '/'].map(key => (
-                      <button
-                        key={key}
-                        onClick={() => setNumericInput(prev => prev + key)}
-                        className="p-3 bg-slate-100 rounded-lg text-center font-medium hover:bg-slate-200"
-                      >
-                        {key}
-                      </button>
-                    ))}
-                    {['4', '5', '6', '.'].map(key => (
-                      <button
-                        key={key}
-                        onClick={() => setNumericInput(prev => prev + key)}
-                        className="p-3 bg-slate-100 rounded-lg text-center font-medium hover:bg-slate-200"
-                      >
-                        {key}
-                      </button>
-                    ))}
-                    {['1', '2', '3', '-'].map(key => (
-                      <button
-                        key={key}
-                        onClick={() => setNumericInput(prev => prev + key)}
-                        className="p-3 bg-slate-100 rounded-lg text-center font-medium hover:bg-slate-200"
-                      >
-                        {key}
-                      </button>
-                    ))}
-                    {['0', 'space', '⌫', 'C'].map(key => (
-                      <button
-                        key={key}
-                        onClick={() => {
-                          if (key === 'space') setNumericInput(prev => prev + ' ');
-                          else if (key === '⌫') setNumericInput(prev => prev.slice(0, -1));
-                          else if (key === 'C') setNumericInput('');
-                          else setNumericInput(prev => prev + key);
-                        }}
-                        className="p-3 bg-slate-100 rounded-lg text-center font-medium hover:bg-slate-200"
-                      >
-                        {key === 'space' ? '␣' : key}
-                      </button>
-                    ))}
-                  </div>
+                  <p className="text-xs text-slate-400">
+                    Tip: You can type numbers, fractions (e.g., 3/4), decimals, or money (e.g., $5 or 5.00)
+                  </p>
                 </div>
               )}
             </CardContent>
@@ -568,13 +640,20 @@ function App() {
             </CardContent>
           </Card>
 
-          <div className="flex gap-4 justify-center mb-8">
-            <Button onClick={() => setView('review')} variant="outline">
+          <div className="flex gap-4 justify-center mb-8 flex-wrap">
+            <Button onClick={() => {
+              setReviewingTest({id: 'current', result: testResult});
+              setView('review');
+            }} variant="outline">
               Review Answers
             </Button>
             <Button onClick={() => startTest(testMode)}>
               <RotateCcw className="w-4 h-4 mr-2" />
               Try Again
+            </Button>
+            <Button onClick={() => setView('history')} variant="outline">
+              <History className="w-4 h-4 mr-2" />
+              Test History
             </Button>
             <Button onClick={() => setView('home')} variant="outline">
               <Home className="w-4 h-4 mr-2" />
@@ -586,73 +665,180 @@ function App() {
     );
   };
 
+  const renderHistory = () => (
+    <div className="min-h-screen bg-slate-50 p-4 md:p-8">
+      <div className="max-w-4xl mx-auto">
+        <div className="flex items-center justify-between mb-6">
+          <h1 className="text-2xl font-bold">Test History</h1>
+          <Button onClick={() => setView('home')} variant="outline">
+            <Home className="w-4 h-4 mr-2" />
+            Back to Home
+          </Button>
+        </div>
+
+        {testHistory.length === 0 ? (
+          <Card>
+            <CardContent className="pt-6 text-center">
+              <p className="text-slate-500">No tests completed yet.</p>
+              <Button className="mt-4" onClick={() => setView('home')}>Start a Test</Button>
+            </CardContent>
+          </Card>
+        ) : (
+          <>
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-4">
+                <Button variant="outline" size="sm" onClick={selectAllTests}>
+                  {selectedTests.size === testHistory.length ? 'Deselect All' : 'Select All'}
+                </Button>
+                {selectedTests.size > 0 && (
+                  <Button variant="destructive" size="sm" onClick={() => setShowDeleteDialog(true)}>
+                    <Trash2 className="w-4 h-4 mr-2" />
+                    Delete ({selectedTests.size})
+                  </Button>
+                )}
+              </div>
+              <Button variant="outline" size="sm" onClick={() => setShowDeleteDialog(true)}>
+                <Trash2 className="w-4 h-4 mr-2" />
+                Delete All
+              </Button>
+            </div>
+
+            <div className="space-y-4">
+              {testHistory.map((test, index) => (
+                <Card key={test.id} className="hover:shadow-md transition-shadow">
+                  <CardContent className="pt-4">
+                    <div className="flex items-center gap-4">
+                      <Checkbox
+                        checked={selectedTests.has(test.id)}
+                        onCheckedChange={() => toggleTestSelection(test.id)}
+                      />
+                      <div className="flex-1">
+                        <div className="flex items-center justify-between mb-2">
+                          <p className="font-medium">Test #{testHistory.length - index}</p>
+                          <span className={`px-2 py-1 rounded text-xs ${
+                            test.result.mode === 'non-calculator' 
+                              ? 'bg-blue-100 text-blue-700' 
+                              : 'bg-green-100 text-green-700'
+                          }`}>
+                            {test.result.mode === 'non-calculator' ? 'Non-Calculator' : 'Calculator'}
+                          </span>
+                        </div>
+                        <div className="grid grid-cols-4 gap-2 text-sm">
+                          <div>
+                            <span className="text-slate-500">Score:</span>
+                            <span className="font-medium ml-1">{test.result.score}%</span>
+                          </div>
+                          <div>
+                            <span className="text-slate-500">Correct:</span>
+                            <span className="font-medium ml-1">{test.result.correctAnswers}/{test.result.totalQuestions}</span>
+                          </div>
+                          <div>
+                            <span className="text-slate-500">Grade:</span>
+                            <span className="font-medium ml-1">{getGrade(test.result.score)}</span>
+                          </div>
+                          <div>
+                            <span className="text-slate-500">Date:</span>
+                            <span className="font-medium ml-1">{new Date(test.result.completedAt).toLocaleDateString()}</span>
+                          </div>
+                        </div>
+                      </div>
+                      <Button 
+                        variant="outline" 
+                        size="sm"
+                        onClick={() => {
+                          setReviewingTest(test);
+                          setView('review');
+                        }}
+                      >
+                        Review
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          </>
+        )}
+      </div>
+
+      <Dialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete Tests</DialogTitle>
+            <DialogDescription>
+              {selectedTests.size > 0 
+                ? `Are you sure you want to delete ${selectedTests.size} selected test(s)?`
+                : 'Are you sure you want to delete all tests?'
+              }
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowDeleteDialog(false)}>Cancel</Button>
+            <Button 
+              variant="destructive" 
+              onClick={selectedTests.size > 0 ? deleteSelectedTests : deleteAllTests}
+            >
+              Delete
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+
   const renderReview = () => {
-    if (!testResult) return null;
+    const testToReview = reviewingTest || (testResult ? {id: 'current', result: testResult} : null);
+    if (!testToReview) return null;
 
     return (
       <div className="min-h-screen bg-slate-50 p-4 md:p-8">
         <div className="max-w-4xl mx-auto">
           <div className="flex items-center justify-between mb-6">
             <h1 className="text-2xl font-bold">Review Answers</h1>
-            <Button onClick={() => setView('results')} variant="outline">
-              Back to Results
+            <Button onClick={() => {
+              setReviewingTest(null);
+              setView(testToReview.id === 'current' ? 'results' : 'history');
+            }} variant="outline">
+              Back
             </Button>
           </div>
 
           <div className="space-y-6">
-            {questions.map((q, i) => {
-              const result = testResult.questionResults.find(r => r.questionId === q.id);
-              if (!result) return null;
-
-              return (
-                <Card key={q.id} className={result.correct ? 'border-green-200' : 'border-red-200'}>
-                  <CardContent className="pt-6">
-                    <div className="flex items-start gap-4">
-                      <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${
-                        result.correct ? 'bg-green-100' : 'bg-red-100'
-                      }`}>
-                        {result.correct ? (
-                          <Check className="w-5 h-5 text-green-600" />
-                        ) : (
-                          <X className="w-5 h-5 text-red-600" />
-                        )}
-                      </div>
-                      <div className="flex-1">
-                        <p className="font-medium mb-2">Question {i + 1}</p>
-                        <p className="text-slate-700 mb-4">{q.questionText}</p>
-                        
-                        {q.diagram && (
-                          <div className="flex justify-center mb-4 p-4 bg-slate-50 rounded-lg">
-                            {renderDiagram(q)}
-                          </div>
-                        )}
-
-                        <div className="space-y-2">
+            {testToReview.result.questionResults.map((result, i) => (
+              <Card key={result.questionId} className={result.correct ? 'border-green-200' : 'border-red-200'}>
+                <CardContent className="pt-6">
+                  <div className="flex items-start gap-4">
+                    <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${
+                      result.correct ? 'bg-green-100' : 'bg-red-100'
+                    }`}>
+                      {result.correct ? (
+                        <Check className="w-5 h-5 text-green-600" />
+                      ) : (
+                        <X className="w-5 h-5 text-red-600" />
+                      )}
+                    </div>
+                    <div className="flex-1">
+                      <p className="font-medium mb-2">Question {i + 1}</p>
+                      
+                      <div className="space-y-2">
+                        <p>
+                          <span className="text-slate-500">Your answer: </span>
+                          <span className={result.correct ? 'text-green-600 font-medium' : 'text-red-600 font-medium'}>
+                            {result.userAnswer || 'Not answered'}
+                          </span>
+                        </p>
+                        {!result.correct && (
                           <p>
-                            <span className="text-slate-500">Your answer: </span>
-                            <span className={result.correct ? 'text-green-600 font-medium' : 'text-red-600 font-medium'}>
-                              {result.userAnswer?.toString() || 'Not answered'}
-                            </span>
+                            <span className="text-slate-500">Correct answer: </span>
+                            <span className="text-green-600 font-medium">{result.correctAnswer}</span>
                           </p>
-                          {!result.correct && (
-                            <p>
-                              <span className="text-slate-500">Correct answer: </span>
-                              <span className="text-green-600 font-medium">{result.correctAnswer.toString()}</span>
-                            </p>
-                          )}
-                          <div className="mt-4 p-4 bg-blue-50 rounded-lg">
-                            <p className="text-sm text-blue-800">
-                              <span className="font-medium">Solution: </span>
-                              {q.workedSolution}
-                            </p>
-                          </div>
-                        </div>
+                        )}
                       </div>
                     </div>
-                  </CardContent>
-                </Card>
-              );
-            })}
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
           </div>
         </div>
       </div>
@@ -665,6 +851,7 @@ function App() {
       {view === 'test' && renderTest()}
       {view === 'results' && renderResults()}
       {view === 'review' && renderReview()}
+      {view === 'history' && renderHistory()}
     </div>
   );
 }
