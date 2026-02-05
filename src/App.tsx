@@ -1,352 +1,229 @@
-import { useState, useEffect } from 'react';
-import type { Question, TestMode, TestResult, TestState, StoredTest } from '@/types';
-import { generateTest } from '@/lib/questions';
-import { formatTime, saveToStorage, loadFromStorage, removeFromStorage, calculateScore, getGrade, getFeedback, normalizeAnswer } from '@/lib/utils';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Progress } from '@/components/ui/progress';
-import { Input } from '@/components/ui/input';
-import { Checkbox } from '@/components/ui/checkbox';
-import { Timer, Calculator, BookOpen, ChevronLeft, ChevronRight, Check, X, RotateCcw, Home, Trophy, AlertCircle, Trash2, History } from 'lucide-react';
-import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-
-// Import diagram components
+import { useState, useEffect, useCallback } from 'react';
+import type { Question, TestMode, TestResult } from './types';
+import { generateTest } from './lib/questions';
 import { 
-  Protractor, 
-  MeasuringJug, 
-  View3D, 
-  MapDiagram, 
-  ShapeDiagram, 
-  RotationShape,
-  BarGraph,
-  Clock,
-  NumberLine,
-  Spinner,
-} from '@/components/diagrams';
+  formatTime, 
+  saveToStorage, 
+  loadFromStorage, 
+  removeFromStorage, 
+  calculateScore, 
+  getGrade, 
+  getFeedback,
+  checkAnswer,
+  uuidv4 
+} from './lib/utils';
+import { Button } from './components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from './components/ui/card';
+import { Progress } from './components/ui/progress';
+import { Input } from './components/ui/input';
+import { Checkbox } from './components/ui/checkbox';
+import { 
+  Timer, Calculator, BookOpen, ChevronLeft, ChevronRight, 
+  Check, X, RotateCcw, Home, Trophy, Trash2, History 
+} from 'lucide-react';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from './components/ui/dialog';
 
-type AppView = 'home' | 'test' | 'review' | 'results' | 'history';
+type View = 'home' | 'test' | 'results' | 'review' | 'history';
 
-const TEST_DURATION = 40 * 60; // 40 minutes in seconds
-const STORAGE_KEY = 'naplan-test-state';
-const RESULTS_KEY = 'naplan-test-results';
+const TEST_DURATION = 40 * 60;
+const TEST_STATE_KEY = 'naplan_test_state';
+const TEST_HISTORY_KEY = 'naplan_test_history';
 
-function App() {
-  const [view, setView] = useState<AppView>('home');
-  const [testMode, setTestMode] = useState<TestMode>('non-calculator');
+interface SavedTestState {
+  mode: TestMode;
+  questions: Question[];
+  currentIndex: number;
+  timeRemaining: number;
+  answers: Record<string, string>;
+}
+
+export default function App() {
+  // View state
+  const [view, setView] = useState<View>('home');
+  
+  // Test state
+  const [mode, setMode] = useState<TestMode>('non-calculator');
   const [questions, setQuestions] = useState<Question[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [timeRemaining, setTimeRemaining] = useState(TEST_DURATION);
   const [answers, setAnswers] = useState<Record<string, string>>({});
-  const [isTestComplete, setIsTestComplete] = useState(false);
-  const [testResult, setTestResult] = useState<TestResult | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [numericInput, setNumericInput] = useState('');
+  const [inputValue, setInputValue] = useState('');
   
-  // Test history state
-  const [testHistory, setTestHistory] = useState<StoredTest[]>([]);
+  // Results state
+  const [testResult, setTestResult] = useState<TestResult | null>(null);
+  
+  // History state
+  const [history, setHistory] = useState<TestResult[]>([]);
   const [selectedTests, setSelectedTests] = useState<Set<string>>(new Set());
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
-  const [reviewingTest, setReviewingTest] = useState<StoredTest | null>(null);
   
-  // In-progress tests state
-  const [inProgressTests, setInProgressTests] = useState<{nonCalculator: boolean; calculator: boolean}>({nonCalculator: false, calculator: false});
-
-  // Load saved data on mount
+  // Check for saved test on mount
   useEffect(() => {
-    // Load test history
-    const history = loadFromStorage<StoredTest[]>(RESULTS_KEY, []);
-    setTestHistory(history);
-    
-    // Check for in-progress tests
-    const savedState = loadFromStorage<TestState | null>(STORAGE_KEY, null);
-    if (savedState && !savedState.isComplete) {
-      setInProgressTests({
-        nonCalculator: savedState.mode === 'non-calculator',
-        calculator: savedState.mode === 'calculator'
-      });
-    }
+    const savedHistory = loadFromStorage<TestResult[]>(TEST_HISTORY_KEY, []);
+    setHistory(savedHistory);
   }, []);
-
-  // Timer effect
+  
+  // Timer
   useEffect(() => {
-    if (view !== 'test' || isTestComplete) return;
-
+    if (view !== 'test') return;
+    
     const timer = setInterval(() => {
       setTimeRemaining(prev => {
         if (prev <= 1) {
-          completeTest();
+          finishTest();
           return 0;
         }
         return prev - 1;
       });
     }, 1000);
-
+    
     return () => clearInterval(timer);
-  }, [view, isTestComplete]);
-
-  // Save test state
+  }, [view, questions.length]);
+  
+  // Auto-save test state
   useEffect(() => {
     if (view === 'test' && questions.length > 0) {
-      const state: TestState = {
-        mode: testMode,
-        questions: questions.map(q => ({ ...q, userAnswer: answers[q.id] })),
-        currentQuestionIndex: currentIndex,
+      const state: SavedTestState = {
+        mode,
+        questions,
+        currentIndex,
         timeRemaining,
-        isComplete: isTestComplete,
-        startTime: Date.now(),
+        answers,
       };
-      saveToStorage(STORAGE_KEY, state);
-      setInProgressTests({
-        nonCalculator: testMode === 'non-calculator',
-        calculator: testMode === 'calculator'
-      });
+      saveToStorage(TEST_STATE_KEY, state);
     }
-  }, [view, questions, answers, currentIndex, timeRemaining, isTestComplete, testMode]);
-
-  const startTest = (mode: TestMode) => {
-    setError(null);
-    try {
-      const generatedQuestions = generateTest(mode, 32);
-      if (generatedQuestions.length === 0) {
-        setError('Failed to generate questions. Please try again.');
-        return;
-      }
-      setTestMode(mode);
-      setQuestions(generatedQuestions);
+  }, [view, mode, questions, currentIndex, timeRemaining, answers]);
+  
+  const startTest = useCallback((testMode: TestMode) => {
+    // Check for existing test of this type
+    const saved = loadFromStorage<SavedTestState | null>(TEST_STATE_KEY, null);
+    if (saved && saved.mode === testMode && saved.questions.length > 0) {
+      // Resume existing test
+      setMode(saved.mode);
+      setQuestions(saved.questions);
+      setCurrentIndex(saved.currentIndex);
+      setTimeRemaining(saved.timeRemaining);
+      setAnswers(saved.answers);
+      setInputValue(saved.answers[saved.questions[saved.currentIndex]?.id] || '');
+    } else {
+      // Start new test
+      const newQuestions = generateTest(testMode, 32);
+      setMode(testMode);
+      setQuestions(newQuestions);
       setCurrentIndex(0);
       setTimeRemaining(TEST_DURATION);
       setAnswers({});
-      setIsTestComplete(false);
-      setNumericInput('');
-      setView('test');
-    } catch (err) {
-      setError('An error occurred while starting the test.');
-      console.error(err);
+      setInputValue('');
+      removeFromStorage(TEST_STATE_KEY);
     }
-  };
-
-  const resumeTest = () => {
-    const savedState = loadFromStorage<TestState | null>(STORAGE_KEY, null);
-    if (savedState && !savedState.isComplete) {
-      setTestMode(savedState.mode);
-      setQuestions(savedState.questions);
-      setCurrentIndex(savedState.currentQuestionIndex);
-      setTimeRemaining(savedState.timeRemaining);
-      const savedAnswers: Record<string, string> = {};
-      savedState.questions.forEach(q => {
-        if (q.userAnswer !== undefined) {
-          savedAnswers[q.id] = String(q.userAnswer);
-        }
-      });
-      setAnswers(savedAnswers);
-      setIsTestComplete(false);
-      setNumericInput(savedAnswers[savedState.questions[savedState.currentQuestionIndex]?.id] || '');
-      setView('test');
-    }
-  };
-
-  const cancelTest = () => {
-    removeFromStorage(STORAGE_KEY);
-    setInProgressTests({nonCalculator: false, calculator: false});
-  };
-
-  const completeTest = () => {
-    setIsTestComplete(true);
+    setView('test');
+  }, []);
+  
+  const cancelTest = useCallback(() => {
+    removeFromStorage(TEST_STATE_KEY);
+    setView('home');
+  }, []);
+  
+  const handleAnswer = useCallback((answer: string) => {
+    const q = questions[currentIndex];
+    if (!q) return;
     
-    // Calculate results
-    const questionResults = questions.map(q => {
-      const userAnswer = answers[q.id] || '';
-      let correct = false;
-      
-      if (q.answerFormat === 'multiple-choice') {
-        correct = userAnswer === q.correctAnswer;
-      } else {
-        correct = normalizeAnswer(userAnswer, q.correctAnswer);
-      }
+    setAnswers(prev => ({ ...prev, [q.id]: answer }));
+  }, [questions, currentIndex]);
+  
+  const submitNumeric = useCallback(() => {
+    if (inputValue.trim()) {
+      handleAnswer(inputValue.trim());
+    }
+  }, [inputValue, handleAnswer]);
+  
+  const goToQuestion = useCallback((index: number) => {
+    if (index >= 0 && index < questions.length) {
+      setCurrentIndex(index);
+      setInputValue(answers[questions[index]?.id] || '');
+    }
+  }, [questions, answers]);
+  
+  const finishTest = useCallback(() => {
+    const results = questions.map(q => {
+      const userAns = answers[q.id] || '';
+      const correct = q.answerFormat === 'multiple-choice' 
+        ? userAns === q.correctAnswer
+        : checkAnswer(userAns, q.correctAnswer);
       
       return {
         questionId: q.id,
         questionType: q.type,
         correct,
-        userAnswer,
-        correctAnswer: String(q.correctAnswer),
+        userAnswer: userAns,
+        correctAnswer: q.correctAnswer,
       };
     });
     
-    const correctCount = questionResults.filter(r => r.correct).length;
+    const correctCount = results.filter(r => r.correct).length;
     const result: TestResult = {
-      mode: testMode,
+      id: uuidv4(),
+      mode,
       totalQuestions: questions.length,
       correctAnswers: correctCount,
       score: calculateScore(correctCount, questions.length),
       timeTaken: TEST_DURATION - timeRemaining,
-      questionResults,
       completedAt: new Date().toISOString(),
+      questionResults: results,
     };
     
     setTestResult(result);
     
     // Save to history
-    const newTest: StoredTest = {
-      id: Date.now().toString(),
-      result,
-    };
-    const history = loadFromStorage<StoredTest[]>(RESULTS_KEY, []);
-    const updatedHistory = [newTest, ...history];
-    saveToStorage(RESULTS_KEY, updatedHistory);
-    setTestHistory(updatedHistory);
+    const updatedHistory = [result, ...history].slice(0, 100); // Keep last 100
+    setHistory(updatedHistory);
+    saveToStorage(TEST_HISTORY_KEY, updatedHistory);
     
-    removeFromStorage(STORAGE_KEY);
-    setInProgressTests({
-      nonCalculator: false,
-      calculator: false
-    });
+    removeFromStorage(TEST_STATE_KEY);
     setView('results');
-  };
-
-  const handleAnswer = (answer: string) => {
-    if (questions[currentIndex]) {
-      setAnswers(prev => ({ ...prev, [questions[currentIndex].id]: answer }));
-    }
-  };
-
-  const handleNumericSubmit = () => {
-    if (numericInput.trim() && questions[currentIndex]) {
-      handleAnswer(numericInput.trim());
-    }
-  };
-
-  const goToQuestion = (index: number) => {
-    if (index >= 0 && index < questions.length) {
-      setCurrentIndex(index);
-      const q = questions[index];
-      setNumericInput(answers[q.id] || '');
-    }
-  };
-
-  const deleteSelectedTests = () => {
-    const updatedHistory = testHistory.filter(t => !selectedTests.has(t.id));
-    saveToStorage(RESULTS_KEY, updatedHistory);
-    setTestHistory(updatedHistory);
+  }, [questions, answers, mode, timeRemaining, history]);
+  
+  const deleteSelected = useCallback(() => {
+    const updated = history.filter(t => !selectedTests.has(t.id));
+    setHistory(updated);
+    saveToStorage(TEST_HISTORY_KEY, updated);
     setSelectedTests(new Set());
     setShowDeleteDialog(false);
-  };
-
-  const deleteAllTests = () => {
-    saveToStorage(RESULTS_KEY, []);
-    setTestHistory([]);
+  }, [history, selectedTests]);
+  
+  const deleteAll = useCallback(() => {
+    setHistory([]);
+    saveToStorage(TEST_HISTORY_KEY, []);
     setSelectedTests(new Set());
     setShowDeleteDialog(false);
-  };
-
-  const toggleTestSelection = (id: string) => {
-    const newSelected = new Set(selectedTests);
-    if (newSelected.has(id)) {
-      newSelected.delete(id);
-    } else {
-      newSelected.add(id);
-    }
-    setSelectedTests(newSelected);
-  };
-
-  const selectAllTests = () => {
-    if (selectedTests.size === testHistory.length) {
+  }, []);
+  
+  const toggleSelection = useCallback((id: string) => {
+    setSelectedTests(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+  
+  const selectAll = useCallback(() => {
+    if (selectedTests.size === history.length) {
       setSelectedTests(new Set());
     } else {
-      setSelectedTests(new Set(testHistory.map(t => t.id)));
+      setSelectedTests(new Set(history.map(t => t.id)));
     }
-  };
-
-  const renderDiagram = (question: Question) => {
-    if (!question.diagram) return null;
-    
-    const { type, data } = question.diagram;
-    
-    switch (type) {
-      case 'protractor':
-        return <Protractor angle={(data as { angle: number }).angle} size={180} />;
-      case 'measuring-jug':
-        return (
-          <MeasuringJug 
-            capacity={(data as { capacity: number }).capacity}
-            currentLevel={(data as { currentLevel: number }).currentLevel}
-            unit={(data as { unit: 'mL' | 'L' }).unit}
-            size={140}
-          />
-        );
-      case '3d-view':
-        return (
-          <View3D 
-            view={(data as { view: 'top' | 'front' | 'side' }).view}
-            blocks={(data as { blocks: number[][] }).blocks}
-            size={140}
-          />
-        );
-      case 'map':
-        return (
-          <MapDiagram 
-            towns={(data as { towns: { name: string; x: number; y: number }[] }).towns}
-            highlightedTowns={(data as { highlightedTowns?: string[] }).highlightedTowns}
-            size={220}
-          />
-        );
-      case 'shape':
-        return (
-          <ShapeDiagram 
-            type={(data as { type: 'rectangle' | 'triangle' | 'L-shape' | 'compound' | 'polygon' }).type}
-            dimensions={(data as { dimensions: Record<string, number> }).dimensions}
-            size={160}
-          />
-        );
-      case 'rotation':
-        return (
-          <RotationShape 
-            shape={(data as { shape: 'L' | 'T' | 'cross' | 'arrow' | 'zigzag' }).shape}
-            rotation={(data as { rotation: 0 | 90 | 180 | 270 }).rotation}
-            direction={(data as { direction?: 'clockwise' | 'anticlockwise' }).direction}
-            size={140}
-          />
-        );
-      case 'bar-graph':
-        return (
-          <BarGraph 
-            data={(data as { data: { label: string; value: number }[] }).data}
-            title={(data as { title?: string }).title}
-            yAxisLabel={(data as { yAxisLabel?: string }).yAxisLabel}
-            size={{ width: 280, height: 180 }}
-          />
-        );
-      case 'clock':
-        return (
-          <Clock 
-            hours={(data as { hours: number }).hours}
-            minutes={(data as { minutes: number }).minutes}
-            size={130}
-          />
-        );
-      case 'number-line':
-        return (
-          <NumberLine 
-            min={(data as { min: number }).min}
-            max={(data as { max: number }).max}
-            markedPosition={(data as { markedPosition?: number }).markedPosition}
-            size={260}
-          />
-        );
-      case 'spinner':
-        return (
-          <Spinner 
-            sections={(data as { sections: number[] }).sections}
-            highlightNumber={(data as { highlightNumber?: number }).highlightNumber}
-            size={130}
-          />
-        );
-      default:
-        return null;
-    }
-  };
-
+  }, [history, selectedTests.size]);
+  
+  // Get saved test info for home screen
+  const savedTest = loadFromStorage<SavedTestState | null>(TEST_STATE_KEY, null);
+  const hasNonCalcProgress = savedTest?.mode === 'non-calculator';
+  const hasCalcProgress = savedTest?.mode === 'calculator';
+  const progressText = savedTest 
+    ? `${Object.keys(savedTest.answers).length}/${savedTest.questions.length} answered, ${formatTime(savedTest.timeRemaining)} left`
+    : '';
+  
+  // Render functions
   const renderHome = () => (
     <div className="min-h-screen bg-gradient-to-b from-blue-50 to-white p-4 md:p-8">
       <div className="max-w-4xl mx-auto">
@@ -356,17 +233,10 @@ function App() {
           </h1>
           <p className="text-slate-600">Practice Test Generator</p>
         </div>
-
-        {error && (
-          <Alert variant="destructive" className="mb-6">
-            <AlertCircle className="h-4 w-4" />
-            <AlertDescription>{error}</AlertDescription>
-          </Alert>
-        )}
-
+        
         <div className="grid md:grid-cols-2 gap-6 mb-6">
           {/* Non-Calculator Card */}
-          <Card className="hover:shadow-lg transition-shadow">
+          <Card>
             <CardHeader className="text-center">
               <div className="mx-auto w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mb-4">
                 <BookOpen className="w-8 h-8 text-blue-600" />
@@ -376,27 +246,28 @@ function App() {
             <CardContent className="text-center">
               <p className="text-slate-600 mb-4">40 minutes • 32 questions</p>
               
-              {inProgressTests.nonCalculator ? (
+              {hasNonCalcProgress ? (
                 <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 mb-4">
-                  <p className="text-amber-800 font-medium mb-2">Test in Progress</p>
+                  <p className="text-amber-800 font-medium mb-1">Test in Progress</p>
+                  <p className="text-amber-600 text-sm mb-3">{progressText}</p>
                   <div className="flex gap-2 justify-center">
-                    <Button size="sm" onClick={resumeTest}>Resume Test</Button>
+                    <Button size="sm" onClick={() => startTest('non-calculator')}>Resume</Button>
                     <Button size="sm" variant="outline" onClick={cancelTest}>Cancel</Button>
                   </div>
                 </div>
               ) : (
                 <>
                   <p className="text-sm text-slate-500 mb-4">
-                    Test your mental math skills with questions on number, algebra, measurement, and geometry.
+                    Test your mental math skills with number, algebra, measurement, and geometry.
                   </p>
                   <Button className="w-full" onClick={() => startTest('non-calculator')}>Start Test</Button>
                 </>
               )}
             </CardContent>
           </Card>
-
+          
           {/* Calculator Card */}
-          <Card className="hover:shadow-lg transition-shadow">
+          <Card>
             <CardHeader className="text-center">
               <div className="mx-auto w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mb-4">
                 <Calculator className="w-8 h-8 text-green-600" />
@@ -406,18 +277,19 @@ function App() {
             <CardContent className="text-center">
               <p className="text-slate-600 mb-4">40 minutes • 32 questions</p>
               
-              {inProgressTests.calculator ? (
+              {hasCalcProgress ? (
                 <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 mb-4">
-                  <p className="text-amber-800 font-medium mb-2">Test in Progress</p>
+                  <p className="text-amber-800 font-medium mb-1">Test in Progress</p>
+                  <p className="text-amber-600 text-sm mb-3">{progressText}</p>
                   <div className="flex gap-2 justify-center">
-                    <Button size="sm" onClick={resumeTest}>Resume Test</Button>
+                    <Button size="sm" onClick={() => startTest('calculator')}>Resume</Button>
                     <Button size="sm" variant="outline" onClick={cancelTest}>Cancel</Button>
                   </div>
                 </div>
               ) : (
                 <>
                   <p className="text-sm text-slate-500 mb-4">
-                    Use your calculator for more complex problems including statistics and probability.
+                    Use your calculator for complex problems including statistics and probability.
                   </p>
                   <Button className="w-full" onClick={() => startTest('calculator')}>Start Test</Button>
                 </>
@@ -425,31 +297,24 @@ function App() {
             </CardContent>
           </Card>
         </div>
-
-        {/* Test History Button */}
+        
         <div className="text-center">
-          <Button variant="outline" onClick={() => setView('history')} className="mb-4">
+          <Button variant="outline" onClick={() => setView('history')}>
             <History className="w-4 h-4 mr-2" />
-            Test History ({testHistory.length} tests)
+            Test History ({history.length})
           </Button>
-        </div>
-
-        <div className="mt-4 text-center">
-          <p className="text-sm text-slate-500">
-            This is a practice tool. Actual NAPLAN tests may differ in format and content.
-          </p>
         </div>
       </div>
     </div>
   );
-
+  
   const renderTest = () => {
-    const currentQuestion = questions[currentIndex];
-    if (!currentQuestion) return null;
-
-    const isAnswered = answers[currentQuestion.id] !== undefined;
+    const q = questions[currentIndex];
+    if (!q) return null;
+    
     const answeredCount = Object.keys(answers).length;
-
+    const isAnswered = answers[q.id] !== undefined;
+    
     return (
       <div className="min-h-screen bg-slate-50">
         {/* Header */}
@@ -461,20 +326,18 @@ function App() {
                   <Home className="w-4 h-4" />
                 </Button>
                 <span className="font-medium text-slate-700">
-                  {testMode === 'non-calculator' ? 'Non-Calculator' : 'Calculator'} Test
+                  {mode === 'non-calculator' ? 'Non-Calculator' : 'Calculator'}
                 </span>
               </div>
-              <div className="flex items-center gap-4">
-                <div className={`flex items-center gap-2 font-mono text-lg font-bold ${
-                  timeRemaining < 300 ? 'text-red-600' : 'text-slate-700'
-                }`}>
-                  <Timer className="w-5 h-5" />
-                  {formatTime(timeRemaining)}
-                </div>
+              <div className={`flex items-center gap-2 font-mono text-lg font-bold ${
+                timeRemaining < 300 ? 'text-red-600' : 'text-slate-700'
+              }`}>
+                <Timer className="w-5 h-5" />
+                {formatTime(timeRemaining)}
               </div>
             </div>
             <div className="mt-2">
-              <div className="flex items-center justify-between text-sm text-slate-500 mb-1">
+              <div className="flex justify-between text-sm text-slate-500 mb-1">
                 <span>Question {currentIndex + 1} of {questions.length}</span>
                 <span>{answeredCount} answered</span>
               </div>
@@ -482,41 +345,33 @@ function App() {
             </div>
           </div>
         </header>
-
+        
         {/* Question */}
         <main className="max-w-4xl mx-auto px-4 py-6">
           <Card className="mb-6">
             <CardContent className="pt-6">
               <div className="mb-4">
-                <span className="inline-block px-2 py-1 bg-slate-100 text-slate-600 text-xs rounded">
-                  {currentQuestion.category.replace('-', ' & ')}
+                <span className="inline-block px-2 py-1 bg-slate-100 text-slate-600 text-xs rounded capitalize">
+                  {q.category.replace('-', ' & ')}
                 </span>
               </div>
               
-              <p className="text-lg mb-6 whitespace-pre-line">{currentQuestion.questionText}</p>
+              <p className="text-lg mb-6 whitespace-pre-line">{q.questionText}</p>
               
-              {currentQuestion.diagram && (
-                <div className="flex justify-center mb-6 p-4 bg-slate-50 rounded-lg">
-                  {renderDiagram(currentQuestion)}
-                </div>
-              )}
-
-              {currentQuestion.answerFormat === 'multiple-choice' ? (
+              {q.answerFormat === 'multiple-choice' ? (
                 <div className="space-y-3">
-                  {currentQuestion.options?.map((option, i) => {
-                    const optionLetter = option.charAt(0);
-                    const isSelected = answers[currentQuestion.id] === optionLetter;
+                  {q.options?.map((opt, i) => {
+                    const letter = opt.charAt(0);
+                    const selected = answers[q.id] === letter;
                     return (
                       <button
-                        key={`${currentQuestion.id}-${i}`}
-                        onClick={() => handleAnswer(optionLetter)}
+                        key={`${q.id}-${i}`}
+                        onClick={() => handleAnswer(letter)}
                         className={`w-full text-left p-4 rounded-lg border-2 transition-all ${
-                          isSelected 
-                            ? 'border-blue-500 bg-blue-50' 
-                            : 'border-slate-200 hover:border-blue-300'
+                          selected ? 'border-blue-500 bg-blue-50' : 'border-slate-200 hover:border-blue-300'
                         }`}
                       >
-                        <span className="font-medium">{option}</span>
+                        <span className="font-medium">{opt}</span>
                       </button>
                     );
                   })}
@@ -526,28 +381,25 @@ function App() {
                   <div className="flex gap-2">
                     <Input
                       type="text"
-                      placeholder="Type your answer here"
-                      value={numericInput}
-                      onChange={(e) => setNumericInput(e.target.value)}
-                      onKeyDown={(e) => e.key === 'Enter' && handleNumericSubmit()}
+                      placeholder="Type your answer"
+                      value={inputValue}
+                      onChange={(e) => setInputValue(e.target.value)}
+                      onKeyDown={(e) => e.key === 'Enter' && submitNumeric()}
                       className="flex-1 text-lg"
-                      autoFocus
                     />
-                    <Button onClick={handleNumericSubmit}>Submit</Button>
+                    <Button onClick={submitNumeric}>Submit</Button>
                   </div>
                   {isAnswered && (
-                    <p className="text-sm text-green-600">
-                      Answer saved: {answers[currentQuestion.id]}
-                    </p>
+                    <p className="text-sm text-green-600">Answer saved: {answers[q.id]}</p>
                   )}
                   <p className="text-xs text-slate-400">
-                    Tip: You can type numbers, fractions (e.g., 3/4), decimals, or money (e.g., $5 or 5.00)
+                    You can type numbers, fractions (e.g., 3/4), decimals, or money (e.g., $5)
                   </p>
                 </div>
               )}
             </CardContent>
           </Card>
-
+          
           {/* Navigation */}
           <div className="flex items-center justify-between">
             <Button
@@ -559,53 +411,43 @@ function App() {
               Previous
             </Button>
             
-            <div className="flex gap-2">
-              {currentIndex === questions.length - 1 ? (
-                <Button onClick={completeTest} variant="default">
-                  Finish Test
-                </Button>
-              ) : (
-                <Button onClick={() => goToQuestion(currentIndex + 1)}>
-                  Next
-                  <ChevronRight className="w-4 h-4 ml-2" />
-                </Button>
-              )}
-            </div>
+            {currentIndex === questions.length - 1 ? (
+              <Button onClick={finishTest}>Finish Test</Button>
+            ) : (
+              <Button onClick={() => goToQuestion(currentIndex + 1)}>
+                Next
+                <ChevronRight className="w-4 h-4 ml-2" />
+              </Button>
+            )}
           </div>
-
+          
           {/* Question Navigator */}
           <div className="mt-6">
-            <p className="text-sm text-slate-500 mb-2">Jump to question:</p>
+            <p className="text-sm text-slate-500 mb-2">Jump to:</p>
             <div className="flex flex-wrap gap-2">
-              {questions.map((q, i) => {
-                const isAnswered = answers[q.id] !== undefined;
-                const isCurrent = i === currentIndex;
-                return (
-                  <button
-                    key={q.id}
-                    onClick={() => goToQuestion(i)}
-                    className={`w-8 h-8 rounded text-sm font-medium transition-colors ${
-                      isCurrent 
-                        ? 'bg-blue-500 text-white' 
-                        : isAnswered 
-                          ? 'bg-green-100 text-green-700 hover:bg-green-200'
-                          : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                    }`}
-                  >
-                    {i + 1}
-                  </button>
-                );
-              })}
+              {questions.map((q, i) => (
+                <button
+                  key={q.id}
+                  onClick={() => goToQuestion(i)}
+                  className={`w-8 h-8 rounded text-sm font-medium ${
+                    i === currentIndex ? 'bg-blue-500 text-white' :
+                    answers[q.id] ? 'bg-green-100 text-green-700' :
+                    'bg-slate-100 text-slate-600'
+                  }`}
+                >
+                  {i + 1}
+                </button>
+              ))}
             </div>
           </div>
         </main>
       </div>
     );
   };
-
+  
   const renderResults = () => {
     if (!testResult) return null;
-
+    
     return (
       <div className="min-h-screen bg-slate-50 p-4 md:p-8">
         <div className="max-w-4xl mx-auto">
@@ -616,7 +458,7 @@ function App() {
             <h1 className="text-3xl font-bold text-slate-800 mb-2">Test Complete!</h1>
             <p className="text-slate-600">{getFeedback(testResult.score)}</p>
           </div>
-
+          
           <Card className="mb-6">
             <CardContent className="pt-6">
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
@@ -639,21 +481,16 @@ function App() {
               </div>
             </CardContent>
           </Card>
-
-          <div className="flex gap-4 justify-center mb-8 flex-wrap">
-            <Button onClick={() => {
-              setReviewingTest({id: 'current', result: testResult});
-              setView('review');
-            }} variant="outline">
-              Review Answers
-            </Button>
-            <Button onClick={() => startTest(testMode)}>
+          
+          <div className="flex gap-4 justify-center flex-wrap">
+            <Button onClick={() => setView('review')} variant="outline">Review Answers</Button>
+            <Button onClick={() => startTest(mode)}>
               <RotateCcw className="w-4 h-4 mr-2" />
               Try Again
             </Button>
             <Button onClick={() => setView('history')} variant="outline">
               <History className="w-4 h-4 mr-2" />
-              Test History
+              History
             </Button>
             <Button onClick={() => setView('home')} variant="outline">
               <Home className="w-4 h-4 mr-2" />
@@ -664,176 +501,40 @@ function App() {
       </div>
     );
   };
-
-  const renderHistory = () => (
-    <div className="min-h-screen bg-slate-50 p-4 md:p-8">
-      <div className="max-w-4xl mx-auto">
-        <div className="flex items-center justify-between mb-6">
-          <h1 className="text-2xl font-bold">Test History</h1>
-          <Button onClick={() => setView('home')} variant="outline">
-            <Home className="w-4 h-4 mr-2" />
-            Back to Home
-          </Button>
-        </div>
-
-        {testHistory.length === 0 ? (
-          <Card>
-            <CardContent className="pt-6 text-center">
-              <p className="text-slate-500">No tests completed yet.</p>
-              <Button className="mt-4" onClick={() => setView('home')}>Start a Test</Button>
-            </CardContent>
-          </Card>
-        ) : (
-          <>
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-4">
-                <Button variant="outline" size="sm" onClick={selectAllTests}>
-                  {selectedTests.size === testHistory.length ? 'Deselect All' : 'Select All'}
-                </Button>
-                {selectedTests.size > 0 && (
-                  <Button variant="destructive" size="sm" onClick={() => setShowDeleteDialog(true)}>
-                    <Trash2 className="w-4 h-4 mr-2" />
-                    Delete ({selectedTests.size})
-                  </Button>
-                )}
-              </div>
-              <Button variant="outline" size="sm" onClick={() => setShowDeleteDialog(true)}>
-                <Trash2 className="w-4 h-4 mr-2" />
-                Delete All
-              </Button>
-            </div>
-
-            <div className="space-y-4">
-              {testHistory.map((test, index) => (
-                <Card key={test.id} className="hover:shadow-md transition-shadow">
-                  <CardContent className="pt-4">
-                    <div className="flex items-center gap-4">
-                      <Checkbox
-                        checked={selectedTests.has(test.id)}
-                        onCheckedChange={() => toggleTestSelection(test.id)}
-                      />
-                      <div className="flex-1">
-                        <div className="flex items-center justify-between mb-2">
-                          <p className="font-medium">Test #{testHistory.length - index}</p>
-                          <span className={`px-2 py-1 rounded text-xs ${
-                            test.result.mode === 'non-calculator' 
-                              ? 'bg-blue-100 text-blue-700' 
-                              : 'bg-green-100 text-green-700'
-                          }`}>
-                            {test.result.mode === 'non-calculator' ? 'Non-Calculator' : 'Calculator'}
-                          </span>
-                        </div>
-                        <div className="grid grid-cols-4 gap-2 text-sm">
-                          <div>
-                            <span className="text-slate-500">Score:</span>
-                            <span className="font-medium ml-1">{test.result.score}%</span>
-                          </div>
-                          <div>
-                            <span className="text-slate-500">Correct:</span>
-                            <span className="font-medium ml-1">{test.result.correctAnswers}/{test.result.totalQuestions}</span>
-                          </div>
-                          <div>
-                            <span className="text-slate-500">Grade:</span>
-                            <span className="font-medium ml-1">{getGrade(test.result.score)}</span>
-                          </div>
-                          <div>
-                            <span className="text-slate-500">Date:</span>
-                            <span className="font-medium ml-1">{new Date(test.result.completedAt).toLocaleDateString()}</span>
-                          </div>
-                        </div>
-                      </div>
-                      <Button 
-                        variant="outline" 
-                        size="sm"
-                        onClick={() => {
-                          setReviewingTest(test);
-                          setView('review');
-                        }}
-                      >
-                        Review
-                      </Button>
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
-          </>
-        )}
-      </div>
-
-      <Dialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Delete Tests</DialogTitle>
-            <DialogDescription>
-              {selectedTests.size > 0 
-                ? `Are you sure you want to delete ${selectedTests.size} selected test(s)?`
-                : 'Are you sure you want to delete all tests?'
-              }
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowDeleteDialog(false)}>Cancel</Button>
-            <Button 
-              variant="destructive" 
-              onClick={selectedTests.size > 0 ? deleteSelectedTests : deleteAllTests}
-            >
-              Delete
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </div>
-  );
-
+  
   const renderReview = () => {
-    const testToReview = reviewingTest || (testResult ? {id: 'current', result: testResult} : null);
-    if (!testToReview) return null;
-
+    if (!testResult) return null;
+    
     return (
       <div className="min-h-screen bg-slate-50 p-4 md:p-8">
         <div className="max-w-4xl mx-auto">
           <div className="flex items-center justify-between mb-6">
             <h1 className="text-2xl font-bold">Review Answers</h1>
-            <Button onClick={() => {
-              setReviewingTest(null);
-              setView(testToReview.id === 'current' ? 'results' : 'history');
-            }} variant="outline">
-              Back
-            </Button>
+            <Button onClick={() => setView('results')} variant="outline">Back</Button>
           </div>
-
-          <div className="space-y-6">
-            {testToReview.result.questionResults.map((result, i) => (
-              <Card key={result.questionId} className={result.correct ? 'border-green-200' : 'border-red-200'}>
-                <CardContent className="pt-6">
+          
+          <div className="space-y-4">
+            {testResult.questionResults.map((r, i) => (
+              <Card key={r.questionId} className={r.correct ? 'border-green-200' : 'border-red-200'}>
+                <CardContent className="pt-4">
                   <div className="flex items-start gap-4">
-                    <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${
-                      result.correct ? 'bg-green-100' : 'bg-red-100'
+                    <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
+                      r.correct ? 'bg-green-100' : 'bg-red-100'
                     }`}>
-                      {result.correct ? (
-                        <Check className="w-5 h-5 text-green-600" />
-                      ) : (
-                        <X className="w-5 h-5 text-red-600" />
-                      )}
+                      {r.correct ? <Check className="w-5 h-5 text-green-600" /> : <X className="w-5 h-5 text-red-600" />}
                     </div>
                     <div className="flex-1">
                       <p className="font-medium mb-2">Question {i + 1}</p>
-                      
-                      <div className="space-y-2">
-                        <p>
-                          <span className="text-slate-500">Your answer: </span>
-                          <span className={result.correct ? 'text-green-600 font-medium' : 'text-red-600 font-medium'}>
-                            {result.userAnswer || 'Not answered'}
-                          </span>
+                      <p className="text-slate-500 text-sm mb-1">Your answer: 
+                        <span className={r.correct ? 'text-green-600 font-medium' : 'text-red-600 font-medium'}>
+                          {r.userAnswer || 'Not answered'}
+                        </span>
+                      </p>
+                      {!r.correct && (
+                        <p className="text-slate-500 text-sm">Correct answer: 
+                          <span className="text-green-600 font-medium">{r.correctAnswer}</span>
                         </p>
-                        {!result.correct && (
-                          <p>
-                            <span className="text-slate-500">Correct answer: </span>
-                            <span className="text-green-600 font-medium">{result.correctAnswer}</span>
-                          </p>
-                        )}
-                      </div>
+                      )}
                     </div>
                   </div>
                 </CardContent>
@@ -844,7 +545,93 @@ function App() {
       </div>
     );
   };
-
+  
+  const renderHistory = () => (
+    <div className="min-h-screen bg-slate-50 p-4 md:p-8">
+      <div className="max-w-4xl mx-auto">
+        <div className="flex items-center justify-between mb-6">
+          <h1 className="text-2xl font-bold">Test History</h1>
+          <Button onClick={() => setView('home')} variant="outline">Home</Button>
+        </div>
+        
+        {history.length === 0 ? (
+          <Card>
+            <CardContent className="pt-6 text-center">
+              <p className="text-slate-500">No tests yet.</p>
+              <Button className="mt-4" onClick={() => setView('home')}>Start a Test</Button>
+            </CardContent>
+          </Card>
+        ) : (
+          <>
+            <div className="flex items-center gap-4 mb-4">
+              <Button variant="outline" size="sm" onClick={selectAll}>
+                {selectedTests.size === history.length ? 'Deselect All' : 'Select All'}
+              </Button>
+              {selectedTests.size > 0 && (
+                <Button variant="destructive" size="sm" onClick={() => setShowDeleteDialog(true)}>
+                  <Trash2 className="w-4 h-4 mr-2" />
+                  Delete ({selectedTests.size})
+                </Button>
+              )}
+              <Button variant="outline" size="sm" onClick={() => setShowDeleteDialog(true)}>
+                <Trash2 className="w-4 h-4 mr-2" />
+                Delete All
+              </Button>
+            </div>
+            
+            <div className="space-y-3">
+              {history.map((test, i) => (
+                <Card key={test.id}>
+                  <CardContent className="pt-4">
+                    <div className="flex items-center gap-4">
+                      <Checkbox
+                        checked={selectedTests.has(test.id)}
+                        onCheckedChange={() => toggleSelection(test.id)}
+                      />
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="font-medium">Test #{history.length - i}</span>
+                          <span className={`text-xs px-2 py-0.5 rounded ${
+                            test.mode === 'non-calculator' ? 'bg-blue-100 text-blue-700' : 'bg-green-100 text-green-700'
+                          }`}>
+                            {test.mode === 'non-calculator' ? 'Non-Calc' : 'Calculator'}
+                          </span>
+                        </div>
+                        <div className="text-sm text-slate-500">
+                          Score: {test.score}% • {test.correctAnswers}/{test.totalQuestions} correct • Grade: {getGrade(test.score)} • {new Date(test.completedAt).toLocaleDateString()}
+                        </div>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          </>
+        )}
+      </div>
+      
+      <Dialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete Tests</DialogTitle>
+            <DialogDescription>
+              {selectedTests.size > 0 
+                ? `Delete ${selectedTests.size} selected test(s)?`
+                : 'Delete all tests?'
+              }
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowDeleteDialog(false)}>Cancel</Button>
+            <Button variant="destructive" onClick={selectedTests.size > 0 ? deleteSelected : deleteAll}>
+              Delete
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+  
   return (
     <div className="font-sans">
       {view === 'home' && renderHome()}
@@ -855,5 +642,3 @@ function App() {
     </div>
   );
 }
-
-export default App;
