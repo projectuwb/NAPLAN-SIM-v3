@@ -38,18 +38,19 @@ export const Clock: React.FC<ClockProps> = ({ data }) => {
       <circle cx={centerX} cy={centerY} r={radius} fill="#fff" stroke="#1e293b" strokeWidth="3" />
       
       {/* Highlight sector */}
-      {highlightSector && (
-        <path
-          d={() => {
-            const start = polarToCartesian(highlightSector.start - 90, radius - 5);
-            const end = polarToCartesian(highlightSector.end - 90, radius - 5);
-            const largeArc = highlightSector.end - highlightSector.start > 180 ? 1 : 0;
-            return `M ${centerX} ${centerY} L ${start.x} ${start.y} A ${radius - 5} ${radius - 5} 0 ${largeArc} 1 ${end.x} ${end.y} Z`;
-          }}
-          fill={highlightSector.color || '#fef3c7'}
-          opacity="0.5"
-        />
-      )}
+      {highlightSector && (() => {
+        const start = polarToCartesian(highlightSector.start - 90, radius - 5);
+        const end = polarToCartesian(highlightSector.end - 90, radius - 5);
+        const largeArc = highlightSector.end - highlightSector.start > 180 ? 1 : 0;
+        const pathData = `M ${centerX} ${centerY} L ${start.x} ${start.y} A ${radius - 5} ${radius - 5} 0 ${largeArc} 1 ${end.x} ${end.y} Z`;
+        return (
+          <path
+            d={pathData}
+            fill={highlightSector.color || '#fef3c7'}
+            opacity="0.5"
+          />
+        );
+      })()}
       
       {/* Hour markers */}
       {showNumbers && (

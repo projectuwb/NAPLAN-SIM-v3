@@ -901,7 +901,7 @@ function scaleReading(): Question {
 function rotation(): Question {
   const rotations = [90, 180, 270];
   const rotation = randChoice(rotations);
-  const shapes = ['triangle', 'square', 'rectangle', 'l-shape'] as const;
+  const shapes: Array<'triangle' | 'square' | 'rectangle' | 'l-shape'> = ['triangle', 'square', 'rectangle', 'l-shape'];
   const shape = randChoice(shapes);
   
   const distractors = rotations.filter(r => r !== rotation);
@@ -925,7 +925,6 @@ function rotation(): Question {
 }
 
 function symmetry(): Question {
-  const lines = randInt(0, 4);
   const shapeNames = ['rectangle', 'square', 'equilateral triangle', 'regular pentagon', 'circle'];
   const shapeName = randChoice(shapeNames);
   
@@ -1096,7 +1095,6 @@ function probabilityQuestion(): Question {
 
 function diceProbability(): Question {
   const outcomes = randInt(1, 6);
-  const probability = outcomes === 6 ? '1/6' : outcomes === 3 ? '1/2' : outcomes === 2 ? '1/3' : `${outcomes}/6`;
   const simplified = outcomes === 6 ? '1/6' : outcomes === 3 ? '1/2' : outcomes === 2 ? '1/3' : outcomes === 4 ? '2/3' : outcomes === 5 ? '5/6' : '1/6';
   
   const distractors = [`${outcomes + 1}/6`, `${outcomes}/12`, `1/${outcomes}`];

@@ -45,7 +45,6 @@ export const Spinner: React.FC<SpinnerProps> = ({ data }) => {
         ].join(' ');
         
         const midAngle = startAngle + sectionAngle / 2;
-        const labelPos = polarToCartesian(midAngle);
         const labelRadius = radius * 0.65;
         const labelRad = (midAngle * Math.PI) / 180;
         const labelX = centerX + labelRadius * Math.cos(labelRad);

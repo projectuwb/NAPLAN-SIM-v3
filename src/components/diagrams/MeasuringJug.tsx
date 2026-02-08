@@ -14,7 +14,6 @@ export const MeasuringJug: React.FC<MeasuringJugProps> = ({ data }) => {
   const { capacity, currentLevel, unit, scaleInterval = 100, showScale = true } = data;
   const jugWidth = 80;
   const jugHeight = 150;
-  const padding = 30;
   
   const fillPercentage = Math.min(currentLevel / capacity, 1);
   const fillHeight = fillPercentage * jugHeight;

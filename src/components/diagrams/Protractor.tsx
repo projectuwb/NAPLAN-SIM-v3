@@ -14,10 +14,6 @@ export const Protractor: React.FC<ProtractorProps> = ({ data }) => {
   const centerX = 100;
   const centerY = 110;
   
-  // Protractor is a semicircle (180 degrees)
-  const startAngle = 180;
-  const endAngle = 0;
-  
   // Angle line position
   const angleRad = (angle * Math.PI) / 180;
   const angleX = centerX + radius * Math.cos(angleRad);

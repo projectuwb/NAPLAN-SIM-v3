@@ -10,7 +10,7 @@ interface View3DProps {
 }
 
 export const View3D: React.FC<View3DProps> = ({ data }) => {
-  const { shape, dimensions, view, showDimensions = true } = data;
+  const { shape: _shape, dimensions, view, showDimensions = true } = data;
   const { width = 60, height = 60, depth = 60 } = dimensions;
   
   const renderCube = () => {
