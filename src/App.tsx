@@ -22,7 +22,8 @@ import {
   Check, X, RotateCcw, Home, Trophy, Trash2, History 
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from './components/ui/dialog';
-import { BarGraph, ShapeDiagram, Spinner, MapDiagram, RotationShape } from './components/diagrams';
+import { BarGraph, Spinner, ShapeDiagram, MapDiagram, NumberLine, Clock, MeasuringJug, Protractor, RotationShape, View3D } from './components/diagrams';
+import type { Diagram } from './types';
 
 type View = 'home' | 'test' | 'results' | 'review' | 'history';
 
@@ -224,47 +225,29 @@ export default function App() {
     ? `${Object.keys(savedTest.answers).length}/${savedTest.questions.length} answered, ${formatTime(savedTest.timeRemaining)} left`
     : '';
   
-  // Render diagram for questions that have them
-  const renderDiagram = (question: Question) => {
-    if (!question.diagram) return null;
-    
-    const { type, data } = question.diagram;
-    
-    switch (type) {
+  // Diagram renderer component
+  const DiagramRenderer: React.FC<{ diagram: Diagram }> = ({ diagram }) => {
+    switch (diagram.type) {
       case 'bar-graph':
-        return (
-          <div className="my-6 flex justify-center">
-            <BarGraph 
-              data={data.data} 
-              title={data.title}
-              yAxisLabel={data.yAxisLabel}
-            />
-          </div>
-        );
-      case 'shape':
-        return (
-          <div className="my-6 flex justify-center">
-            <ShapeDiagram {...data} />
-          </div>
-        );
+        return <BarGraph data={diagram.data} />;
       case 'spinner':
-        return (
-          <div className="my-6 flex justify-center">
-            <Spinner sections={data.sections} highlightNumber={data.highlightNumber} />
-          </div>
-        );
+        return <Spinner data={diagram.data} />;
+      case 'shape':
+        return <ShapeDiagram data={diagram.data} />;
       case 'map':
-        return (
-          <div className="my-6 flex justify-center">
-            <MapDiagram towns={data.towns} highlightedTowns={data.highlightedTowns} />
-          </div>
-        );
-      case 'rotation':
-        return (
-          <div className="my-6 flex justify-center">
-            <RotationShape shape={data.shape} rotation={data.rotation} direction={data.direction} />
-          </div>
-        );
+        return <MapDiagram data={diagram.data} />;
+      case 'number-line':
+        return <NumberLine data={diagram.data} />;
+      case 'clock':
+        return <Clock data={diagram.data} />;
+      case 'measuring-jug':
+        return <MeasuringJug data={diagram.data} />;
+      case 'protractor':
+        return <Protractor data={diagram.data} />;
+      case 'rotation-shape':
+        return <RotationShape data={diagram.data} />;
+      case 'view-3d':
+        return <View3D data={diagram.data} />;
       default:
         return null;
     }
@@ -405,7 +388,11 @@ export default function App() {
               
               <p className="text-lg mb-6 whitespace-pre-line">{q.questionText}</p>
               
-              {renderDiagram(q)}
+              {q.diagram && (
+                <div className="mb-6 flex justify-center">
+                  <DiagramRenderer diagram={q.diagram} />
+                </div>
+              )}
               
               {q.answerFormat === 'multiple-choice' ? (
                 <div className="space-y-3">

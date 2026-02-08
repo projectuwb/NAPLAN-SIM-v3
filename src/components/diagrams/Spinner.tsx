@@ -1,91 +1,87 @@
 import React from 'react';
 
 interface SpinnerProps {
-  sections: number[];
-  colors?: string[];
-  highlightNumber?: number;
-  size?: number;
+  data: {
+    sections: { color: string; label: string; size: number }[];
+    arrowAngle?: number;
+  };
 }
 
-export const Spinner: React.FC<SpinnerProps> = ({ 
-  sections, 
-  colors = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899'],
-  highlightNumber,
-  size = 150 
-}) => {
-  const centerX = size / 2;
-  const centerY = size / 2;
-  const radius = size * 0.4;
-  const anglePerSection = 360 / sections.length;
+export const Spinner: React.FC<SpinnerProps> = ({ data }) => {
+  const { sections, arrowAngle = 0 } = data;
+  const total = sections.reduce((sum, s) => sum + s.size, 0);
+  const radius = 100;
+  const centerX = 120;
+  const centerY = 120;
   
-  // Generate sections
-  const sectionElements = sections.map((num, i) => {
-    const startAngle = i * anglePerSection;
-    const endAngle = (i + 1) * anglePerSection;
-    
-    // Convert to radians
-    const startRad = ((startAngle - 90) * Math.PI) / 180;
-    const endRad = ((endAngle - 90) * Math.PI) / 180;
-    
-    // Calculate path
-    const x1 = centerX + radius * Math.cos(startRad);
-    const y1 = centerY + radius * Math.sin(startRad);
-    const x2 = centerX + radius * Math.cos(endRad);
-    const y2 = centerY + radius * Math.sin(endRad);
-    
-    const largeArc = anglePerSection > 180 ? 1 : 0;
-    
-    const isHighlighted = highlightNumber === num;
-    
-    return (
-      <g key={i}>
-        <path
-          d={`M ${centerX} ${centerY} L ${x1} ${y1} A ${radius} ${radius} 0 ${largeArc} 1 ${x2} ${y2} Z`}
-          fill={colors[i % colors.length]}
-          stroke={isHighlighted ? '#dc2626' : '#333'}
-          strokeWidth={isHighlighted ? 4 : 2}
-        />
-        {/* Number label */}
-        <text
-          x={centerX + radius * 0.65 * Math.cos((startRad + endRad) / 2)}
-          y={centerY + radius * 0.65 * Math.sin((startRad + endRad) / 2) + 5}
-          textAnchor="middle"
-          fontSize="16"
-          fontWeight="bold"
-          fill="white"
-        >
-          {num}
-        </text>
-      </g>
-    );
-  });
+  let currentAngle = -90; // Start from top
+  
+  const polarToCartesian = (angle: number) => {
+    const rad = (angle * Math.PI) / 180;
+    return {
+      x: centerX + radius * Math.cos(rad),
+      y: centerY + radius * Math.sin(rad),
+    };
+  };
   
   return (
-    <svg width={size} height={size + 30} viewBox={`0 0 ${size} ${size + 30}`}>
+    <svg viewBox="0 0 240 240" className="w-60 h-60 mx-auto">
       {/* Spinner sections */}
-      {sectionElements}
+      {sections.map((section, i) => {
+        const sectionAngle = (section.size / total) * 360;
+        const startAngle = currentAngle;
+        const endAngle = currentAngle + sectionAngle;
+        currentAngle = endAngle;
+        
+        const start = polarToCartesian(startAngle);
+        const end = polarToCartesian(endAngle);
+        const largeArc = sectionAngle > 180 ? 1 : 0;
+        
+        const pathData = [
+          `M ${centerX} ${centerY}`,
+          `L ${start.x} ${start.y}`,
+          `A ${radius} ${radius} 0 ${largeArc} 1 ${end.x} ${end.y}`,
+          'Z',
+        ].join(' ');
+        
+        const midAngle = startAngle + sectionAngle / 2;
+        const labelPos = polarToCartesian(midAngle);
+        const labelRadius = radius * 0.65;
+        const labelRad = (midAngle * Math.PI) / 180;
+        const labelX = centerX + labelRadius * Math.cos(labelRad);
+        const labelY = centerY + labelRadius * Math.sin(labelRad);
+        
+        return (
+          <g key={i}>
+            <path d={pathData} fill={section.color} stroke="#fff" strokeWidth="2" />
+            <text
+              x={labelX}
+              y={labelY}
+              textAnchor="middle"
+              dominantBaseline="middle"
+              className="fill-white text-xs font-medium"
+              style={{ textShadow: '1px 1px 2px rgba(0,0,0,0.5)' }}
+            >
+              {section.label}
+            </text>
+          </g>
+        );
+      })}
       
-      {/* Center */}
-      <circle cx={centerX} cy={centerY} r="8" fill="#333" />
+      {/* Center circle */}
+      <circle cx={centerX} cy={centerY} r="12" fill="#334155" />
       
-      {/* Pointer */}
-      <polygon
-        points={`${centerX},${centerY - radius - 10} ${centerX - 8},${centerY - radius + 5} ${centerX + 8},${centerY - radius + 5}`}
-        fill="#dc2626"
-        stroke="#333"
-        strokeWidth="1"
-      />
-      
-      {/* Legend */}
-      <text
-        x={centerX}
-        y={size + 20}
-        textAnchor="middle"
-        fontSize="12"
-        fill="#333"
-      >
-        {sections.filter(n => n === highlightNumber).length} in {sections.length} sections
-      </text>
+      {/* Arrow */}
+      <g transform={`rotate(${arrowAngle}, ${centerX}, ${centerY})`}>
+        <polygon
+          points={`${centerX},${centerY - radius - 5} ${centerX - 8},${centerY - radius + 15} ${centerX + 8},${centerY - radius + 15}`}
+          fill="#ef4444"
+          stroke="#991b1b"
+          strokeWidth="1"
+        />
+      </g>
     </svg>
   );
 };
+
+export default Spinner;

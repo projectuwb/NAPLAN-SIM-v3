@@ -1,141 +1,103 @@
 import React from 'react';
 
 interface MeasuringJugProps {
-  capacity: number; // in mL
-  currentLevel: number; // in mL
-  unit: 'mL' | 'L';
-  size?: number;
+  data: {
+    capacity: number;
+    currentLevel: number;
+    unit: string;
+    scaleInterval?: number;
+    showScale?: boolean;
+  };
 }
 
-export const MeasuringJug: React.FC<MeasuringJugProps> = ({ 
-  capacity, 
-  currentLevel, 
-  unit,
-  size = 150 
-}) => {
-  const width = size;
-  const height = size * 1.5;
-  const padding = 20;
-  const jugWidth = width - 2 * padding;
-  const jugHeight = height - 2 * padding;
+export const MeasuringJug: React.FC<MeasuringJugProps> = ({ data }) => {
+  const { capacity, currentLevel, unit, scaleInterval = 100, showScale = true } = data;
+  const jugWidth = 80;
+  const jugHeight = 150;
+  const padding = 30;
   
-  // Calculate liquid height
-  const liquidHeight = (currentLevel / capacity) * (jugHeight - 30);
-  const liquidY = padding + jugHeight - 30 - liquidHeight;
+  const fillPercentage = Math.min(currentLevel / capacity, 1);
+  const fillHeight = fillPercentage * jugHeight;
   
-  // Generate scale marks
-  const scaleMarks = [];
-  const numMarks = unit === 'L' ? capacity : capacity / 100;
-  const markStep = unit === 'L' ? 1 : 100;
+  // Jug shape (trapezoid)
+  const topWidth = jugWidth + 20;
+  const bottomWidth = jugWidth;
+  const centerX = 100;
+  const baseY = 180;
   
-  for (let i = 0; i <= numMarks; i++) {
-    const markValue = i * markStep;
-    const markY = padding + jugHeight - 30 - (i / numMarks) * (jugHeight - 30);
-    const isMajor = i % (unit === 'L' ? 1 : 5) === 0;
-    
-    scaleMarks.push(
-      <g key={i}>
-        <line
-          x1={padding + jugWidth - (isMajor ? 20 : 10)}
-          y1={markY}
-          x2={padding + jugWidth}
-          y2={markY}
-          stroke="#333"
-          strokeWidth={isMajor ? 2 : 1}
-        />
-        {isMajor && (
-          <text
-            x={padding + jugWidth - 25}
-            y={markY + 4}
-            textAnchor="end"
-            fontSize="10"
-            fill="#333"
-          >
-            {markValue}
-          </text>
-        )}
-      </g>
-    );
-  }
+  const jugPath = [
+    `M ${centerX - topWidth / 2} ${baseY - jugHeight}`,
+    `L ${centerX + topWidth / 2} ${baseY - jugHeight}`,
+    `L ${centerX + bottomWidth / 2} ${baseY}`,
+    `L ${centerX - bottomWidth / 2} ${baseY}`,
+    'Z',
+  ].join(' ');
+  
+  // Scale marks
+  const numMarks = Math.floor(capacity / scaleInterval);
   
   return (
-    <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`}>
+    <svg viewBox="0 0 200 220" className="w-40 h-52 mx-auto">
       {/* Jug outline */}
-      <path
-        d={`
-          M ${padding + 10} ${padding} 
-          L ${padding + jugWidth - 10} ${padding} 
-          Q ${padding + jugWidth} ${padding} ${padding + jugWidth} ${padding + 10}
-          L ${padding + jugWidth} ${padding + jugHeight - 30}
-          Q ${padding + jugWidth} ${padding + jugHeight} ${padding + jugWidth - 20} ${padding + jugHeight}
-          L ${padding + 20} ${padding + jugHeight}
-          Q ${padding} ${padding + jugHeight} ${padding} ${padding + jugHeight - 30}
-          L ${padding} ${padding + 10}
-          Q ${padding} ${padding} ${padding + 10} ${padding}
-        `}
-        fill="none"
-        stroke="#333"
-        strokeWidth="2"
+      <path d={jugPath} fill="none" stroke="#475569" strokeWidth="3" />
+      
+      {/* Liquid fill */}
+      <defs>
+        <clipPath id="jugClip">
+          <path d={jugPath} />
+        </clipPath>
+      </defs>
+      
+      <rect
+        x={centerX - topWidth / 2 - 10}
+        y={baseY - fillHeight}
+        width={topWidth + 20}
+        height={fillHeight}
+        fill="#3b82f6"
+        opacity="0.6"
+        clipPath="url(#jugClip)"
       />
       
-      {/* Spout */}
-      <path
-        d={`
-          M ${padding} ${padding + 20}
-          L ${padding - 15} ${padding + 15}
-          L ${padding - 15} ${padding + 25}
-          L ${padding} ${padding + 30}
-        `}
-        fill="none"
-        stroke="#333"
-        strokeWidth="2"
-      />
-      
-      {/* Handle */}
-      <path
-        d={`
-          M ${padding + jugWidth} ${padding + 30}
-          Q ${padding + jugWidth + 25} ${padding + 30} ${padding + jugWidth + 25} ${padding + 60}
-          L ${padding + jugWidth + 25} ${padding + 90}
-          Q ${padding + jugWidth + 25} ${padding + 120} ${padding + jugWidth} ${padding + 120}
-        `}
-        fill="none"
-        stroke="#333"
-        strokeWidth="3"
-      />
-      
-      {/* Liquid */}
-      {currentLevel > 0 && (
-        <path
-          d={`
-            M ${padding + 5} ${liquidY}
-            L ${padding + jugWidth - 5} ${liquidY}
-            L ${padding + jugWidth - 5} ${padding + jugHeight - 20}
-            Q ${padding + jugWidth - 10} ${padding + jugHeight - 5} ${padding + jugWidth - 20} ${padding + jugHeight - 5}
-            L ${padding + 20} ${padding + jugHeight - 5}
-            Q ${padding + 10} ${padding + jugHeight - 5} ${padding + 5} ${padding + jugHeight - 20}
-            Z
-          `}
-          fill="#3b82f6"
-          fillOpacity="0.6"
-          stroke="none"
-        />
+      {/* Scale */}
+      {showScale && (
+        <>
+          {Array.from({ length: numMarks + 1 }).map((_, i) => {
+            const level = i * scaleInterval;
+            const y = baseY - (level / capacity) * jugHeight;
+            return (
+              <g key={i}>
+                <line
+                  x1={centerX + bottomWidth / 2}
+                  y1={y}
+                  x2={centerX + bottomWidth / 2 + 10}
+                  y2={y}
+                  stroke="#475569"
+                  strokeWidth="1"
+                />
+                <text
+                  x={centerX + bottomWidth / 2 + 15}
+                  y={y + 4}
+                  className="fill-slate-600 text-xs"
+                >
+                  {level}
+                </text>
+              </g>
+            );
+          })}
+        </>
       )}
       
-      {/* Scale marks */}
-      {scaleMarks}
+      {/* Capacity label */}
+      <text x={centerX} y={baseY + 20} textAnchor="middle" className="fill-slate-700 text-sm">
+        {capacity} {unit}
+      </text>
       
-      {/* Unit label */}
-      <text
-        x={padding + jugWidth - 25}
-        y={padding - 5}
-        textAnchor="end"
-        fontSize="12"
-        fontWeight="bold"
-        fill="#333"
-      >
-        {unit}
+      {/* Current level label */}
+      <text x={centerX} y={baseY - jugHeight - 10} textAnchor="middle" className="fill-blue-600 text-sm font-medium">
+        {currentLevel} {unit}
       </text>
     </svg>
   );
 };
+
+export default MeasuringJug;

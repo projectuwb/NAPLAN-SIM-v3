@@ -9,64 +9,88 @@ export type QuestionType =
   | 'equations'
   | 'ratio'
   | 'mean'
-  | 'algebra'
-  | 'ordering'
+  | 'ordering-numbers'
   | 'mixed-numbers'
+  | 'algebra-patterns'
+  | 'percentage-discount'
+  | 'percentage-of-quantity'
+  | 'fraction-decimal-percent'
+  | 'negative-numbers'
+  | 'index-notation'
+  | 'square-root'
   // Measurement & Geometry
   | 'perimeter'
   | 'area'
   | 'volume'
   | 'time'
   | 'speed'
-  | 'measurement'
+  | 'l-shape-area'
+  | 'l-shape-perimeter'
+  | 'triangle-area'
+  | 'parallelogram-area'
+  | 'trapezium-area'
+  | 'circle-circumference'
+  | 'circle-area'
+  | 'composite-shape'
+  | 'net-cube'
+  | 'net-rectangular-prism'
+  | 'volume-prism'
+  | 'surface-area'
+  | 'capacity'
+  | 'mass'
   | 'temperature'
-  | 'L-shape'
-  | 'shape'
-  | 'triangle'
-  | 'views'
-  | '3d-view'
-  | 'net'
-  | 'nets'
-  | 'rotation'
-  | 'transformations'
+  | 'length-conversion'
+  | 'angle-types'
+  | 'angles-on-line'
+  | 'angles-in-triangle'
+  | 'angles-in-quadrilateral'
+  | 'bearing'
+  | 'compass-directions'
   | 'coordinates'
-  | 'angles'
-  | 'protractor'
-  | 'scale'
-  | 'polygon'
-  | 'isosceles'
+  | 'reflection'
+  | 'rotation'
+  | 'translation'
   | 'symmetry'
-  | 'geometry'
+  | 'scale-reading'
+  | 'timetable'
+  | 'calendar'
   // Statistics & Probability
   | 'probability'
   | 'statistics'
-  | 'spinner'
   | 'bar-graph'
-  | 'map'
+  | 'pie-chart'
+  | 'line-graph'
+  | 'stem-leaf'
+  | 'dot-plot'
+  | 'two-way-table'
+  | 'venn-diagram'
   | 'map-reading'
-  | 'enlargement'
-  | 'postage'
-  | 'profit';
+  | 'spinner'
+  | 'dice-probability'
+  | 'card-probability'
+  | 'experimental-probability'
+  | 'tree-diagram';
 
 export type TestMode = 'non-calculator' | 'calculator';
 
 export type AnswerFormat = 'multiple-choice' | 'numeric';
 
+export interface Diagram {
+  type: 'bar-graph' | 'spinner' | 'shape' | 'map' | 'number-line' | 'clock' | 'measuring-jug' | 'protractor' | 'rotation-shape' | 'view-3d' | 'net' | 'coordinates' | 'pie-chart' | 'line-graph' | 'stem-leaf' | 'two-way-table' | 'venn-diagram' | 'tree-diagram';
+  data?: any;
+}
+
 export interface Question {
   id: string;
   type: QuestionType;
   mode: TestMode;
-  difficulty?: 'basic' | 'intermediate' | 'advanced';
   questionText: string;
   answerFormat: AnswerFormat;
   options?: string[];
-  correctAnswer: string | number;
+  correctAnswer: string;
   workedSolution: string;
   category: 'number-algebra' | 'measurement-geometry' | 'statistics-probability';
-  diagram?: {
-    type: string;
-    data: Record<string, unknown>;
-  };
+  diagram?: Diagram;
 }
 
 export interface TestResult {

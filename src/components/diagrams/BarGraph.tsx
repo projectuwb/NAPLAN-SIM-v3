@@ -1,132 +1,56 @@
 import React from 'react';
 
-interface BarData {
-  label: string;
-  value: number;
-  color?: string;
-}
-
 interface BarGraphProps {
-  data: BarData[];
-  title?: string;
-  yAxisLabel?: string;
-  xAxisLabel?: string;
-  maxValue?: number;
-  size?: { width: number; height: number };
+  data: {
+    labels: string[];
+    values: number[];
+    title?: string;
+    yAxisLabel?: string;
+    color?: string;
+  };
 }
 
-export const BarGraph: React.FC<BarGraphProps> = ({ 
-  data, 
-  title,
-  yAxisLabel,
-  xAxisLabel,
-  maxValue,
-  size = { width: 300, height: 200 }
-}) => {
-  const { width, height } = size;
-  const padding = { top: 40, right: 20, bottom: 50, left: 50 };
-  const chartWidth = width - padding.left - padding.right;
-  const chartHeight = height - padding.top - padding.bottom;
-  
-  const actualMax = maxValue || Math.max(...data.map(d => d.value)) * 1.1;
-  const barWidth = (chartWidth / data.length) * 0.7;
-  const barSpacing = (chartWidth / data.length) * 0.3;
-  
-  // Generate Y-axis ticks
-  const yTicks = [];
-  const numTicks = 5;
-  for (let i = 0; i <= numTicks; i++) {
-    const value = (actualMax / numTicks) * i;
-    const y = padding.top + chartHeight - (value / actualMax) * chartHeight;
-    yTicks.push(
-      <g key={i}>
-        <line
-          x1={padding.left - 5}
-          y1={y}
-          x2={padding.left}
-          y2={y}
-          stroke="#333"
-          strokeWidth="1"
-        />
-        <text
-          x={padding.left - 10}
-          y={y + 4}
-          textAnchor="end"
-          fontSize="10"
-          fill="#333"
-        >
-          {Math.round(value)}
-        </text>
-        <line
-          x1={padding.left}
-          y1={y}
-          x2={width - padding.right}
-          y2={y}
-          stroke="#e5e7eb"
-          strokeWidth="1"
-        />
-      </g>
-    );
-  }
+export const BarGraph: React.FC<BarGraphProps> = ({ data }) => {
+  const { labels, values, title, yAxisLabel, color = '#3b82f6' } = data;
+  const maxValue = Math.max(...values);
+  const chartHeight = 200;
+  const chartWidth = 320;
+  const barWidth = 40;
+  const gap = (chartWidth - labels.length * barWidth) / (labels.length + 1);
   
   return (
-    <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`}>
+    <svg viewBox="0 0 400 280" className="w-full max-w-md mx-auto">
       {/* Title */}
       {title && (
-        <text
-          x={width / 2}
-          y={20}
-          textAnchor="middle"
-          fontSize="14"
-          fontWeight="bold"
-          fill="#333"
-        >
+        <text x="200" y="20" textAnchor="middle" className="fill-slate-800 text-sm font-medium">
           {title}
         </text>
       )}
       
-      {/* Y-axis */}
-      <line
-        x1={padding.left}
-        y1={padding.top}
-        x2={padding.left}
-        y2={height - padding.bottom}
-        stroke="#333"
-        strokeWidth="2"
-      />
-      
-      {/* X-axis */}
-      <line
-        x1={padding.left}
-        y1={height - padding.bottom}
-        x2={width - padding.right}
-        y2={height - padding.bottom}
-        stroke="#333"
-        strokeWidth="2"
-      />
-      
       {/* Y-axis label */}
       {yAxisLabel && (
-        <text
-          x={15}
-          y={height / 2}
-          textAnchor="middle"
-          fontSize="12"
-          fill="#333"
-          transform={`rotate(-90, 15, ${height / 2})`}
-        >
+        <text x="15" y="140" textAnchor="middle" transform="rotate(-90, 15, 140)" className="fill-slate-600 text-xs">
           {yAxisLabel}
         </text>
       )}
       
-      {/* Y-axis ticks */}
-      {yTicks}
+      {/* Y-axis grid lines */}
+      {[0, 0.25, 0.5, 0.75, 1].map((ratio, i) => {
+        const y = 240 - ratio * chartHeight;
+        const value = Math.round(maxValue * ratio);
+        return (
+          <g key={i}>
+            <line x1="50" y1={y} x2="370" y2={y} stroke="#e2e8f0" strokeWidth="1" />
+            <text x="45" y={y + 4} textAnchor="end" className="fill-slate-500 text-xs">{value}</text>
+          </g>
+        );
+      })}
       
       {/* Bars */}
-      {data.map((item, i) => {
-        const barHeight = (item.value / actualMax) * chartHeight;
-        const x = padding.left + i * (barWidth + barSpacing) + barSpacing / 2;
-        const y = padding.top + chartHeight - barHeight;
+      {values.map((value, i) => {
+        const barHeight = (value / maxValue) * chartHeight;
+        const x = 50 + gap + i * (barWidth + gap);
+        const y = 240 - barHeight;
         
         return (
           <g key={i}>
@@ -135,45 +59,26 @@ export const BarGraph: React.FC<BarGraphProps> = ({
               y={y}
               width={barWidth}
               height={barHeight}
-              fill={item.color || '#3b82f6'}
+              fill={color}
               stroke="#1e40af"
               strokeWidth="1"
+              rx="2"
             />
-            <text
-              x={x + barWidth / 2}
-              y={y - 5}
-              textAnchor="middle"
-              fontSize="11"
-              fontWeight="bold"
-              fill="#333"
-            >
-              {item.value}
+            <text x={x + barWidth / 2} y="255" textAnchor="middle" className="fill-slate-700 text-xs">
+              {labels[i]}
             </text>
-            <text
-              x={x + barWidth / 2}
-              y={height - padding.bottom + 20}
-              textAnchor="middle"
-              fontSize="11"
-              fill="#333"
-            >
-              {item.label}
+            <text x={x + barWidth / 2} y={y - 5} textAnchor="middle" className="fill-slate-800 text-xs font-medium">
+              {value}
             </text>
           </g>
         );
       })}
       
-      {/* X-axis label */}
-      {xAxisLabel && (
-        <text
-          x={width / 2}
-          y={height - 10}
-          textAnchor="middle"
-          fontSize="12"
-          fill="#333"
-        >
-          {xAxisLabel}
-        </text>
-      )}
+      {/* Axes */}
+      <line x1="50" y1="240" x2="370" y2="240" stroke="#64748b" strokeWidth="2" />
+      <line x1="50" y1="40" x2="50" y2="240" stroke="#64748b" strokeWidth="2" />
     </svg>
   );
 };
+
+export default BarGraph;

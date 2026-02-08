@@ -1,100 +1,103 @@
 import React from 'react';
 
 interface ClockProps {
-  hours: number;
-  minutes: number;
-  showTime?: boolean;
-  size?: number;
+  data: {
+    hour: number;
+    minute: number;
+    showNumbers?: boolean;
+    highlightSector?: { start: number; end: number; color?: string };
+  };
 }
 
-export const Clock: React.FC<ClockProps> = ({ 
-  hours, 
-  minutes, 
-  showTime = false,
-  size = 150 
-}) => {
-  const centerX = size / 2;
-  const centerY = size / 2;
-  const radius = size * 0.4;
+export const Clock: React.FC<ClockProps> = ({ data }) => {
+  const { hour, minute, showNumbers = true, highlightSector } = data;
+  const radius = 80;
+  const centerX = 100;
+  const centerY = 100;
   
   // Calculate hand angles
-  const hourAngle = ((hours % 12) + minutes / 60) * 30; // 30 degrees per hour
-  const minuteAngle = minutes * 6; // 6 degrees per minute
+  const hourAngle = ((hour % 12) + minute / 60) * 30 - 90;
+  const minuteAngle = minute * 6 - 90;
   
-  // Convert to radians (subtract from 90 to start from top)
-  const hourRad = ((90 - hourAngle) * Math.PI) / 180;
-  const minuteRad = ((90 - minuteAngle) * Math.PI) / 180;
-  
-  // Calculate hand endpoints
-  const hourX = centerX + radius * 0.5 * Math.cos(hourRad);
-  const hourY = centerY - radius * 0.5 * Math.sin(hourRad);
-  const minuteX = centerX + radius * 0.8 * Math.cos(minuteRad);
-  const minuteY = centerY - radius * 0.8 * Math.sin(minuteRad);
-  
-  // Generate hour markers
-  const markers = [];
-  for (let i = 1; i <= 12; i++) {
-    const angle = ((90 - i * 30) * Math.PI) / 180;
-    const x1 = centerX + radius * 0.85 * Math.cos(angle);
-    const y1 = centerY - radius * 0.85 * Math.sin(angle);
-    const x2 = centerX + radius * 0.95 * Math.cos(angle);
-    const y2 = centerY - radius * 0.95 * Math.sin(angle);
-    
-    markers.push(
-      <g key={i}>
-        <line
-          x1={x1}
-          y1={y1}
-          x2={x2}
-          y2={y2}
-          stroke="#333"
-          strokeWidth={i % 3 === 0 ? 3 : 2}
-        />
-        {i % 3 === 0 && (
-          <text
-            x={centerX + radius * 0.7 * Math.cos(angle)}
-            y={centerY - radius * 0.7 * Math.sin(angle) + 5}
-            textAnchor="middle"
-            fontSize="14"
-            fontWeight="bold"
-            fill="#333"
-          >
-            {i}
-          </text>
-        )}
-      </g>
-    );
-  }
-  
-  // Format time display
-  const formatTime = () => {
-    const h = hours.toString();
-    const m = minutes.toString().padStart(2, '0');
-    return `${h}:${m}`;
+  const polarToCartesian = (angle: number, r: number) => {
+    const rad = (angle * Math.PI) / 180;
+    return {
+      x: centerX + r * Math.cos(rad),
+      y: centerY + r * Math.sin(rad),
+    };
   };
   
+  // Hour hand
+  const hourHand = polarToCartesian(hourAngle, radius * 0.5);
+  // Minute hand
+  const minuteHand = polarToCartesian(minuteAngle, radius * 0.75);
+  
   return (
-    <svg width={size} height={size + (showTime ? 25 : 0)} viewBox={`0 0 ${size} ${size + (showTime ? 25 : 0)}`}>
+    <svg viewBox="0 0 200 200" className="w-48 h-48 mx-auto">
       {/* Clock face */}
-      <circle
-        cx={centerX}
-        cy={centerY}
-        r={radius}
-        fill="white"
-        stroke="#333"
-        strokeWidth="3"
-      />
+      <circle cx={centerX} cy={centerY} r={radius} fill="#fff" stroke="#1e293b" strokeWidth="3" />
+      
+      {/* Highlight sector */}
+      {highlightSector && (
+        <path
+          d={() => {
+            const start = polarToCartesian(highlightSector.start - 90, radius - 5);
+            const end = polarToCartesian(highlightSector.end - 90, radius - 5);
+            const largeArc = highlightSector.end - highlightSector.start > 180 ? 1 : 0;
+            return `M ${centerX} ${centerY} L ${start.x} ${start.y} A ${radius - 5} ${radius - 5} 0 ${largeArc} 1 ${end.x} ${end.y} Z`;
+          }}
+          fill={highlightSector.color || '#fef3c7'}
+          opacity="0.5"
+        />
+      )}
       
       {/* Hour markers */}
-      {markers}
+      {showNumbers && (
+        <>
+          {[12, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].map((num, i) => {
+            const angle = i * 30 - 90;
+            const pos = polarToCartesian(angle, radius - 15);
+            return (
+              <text
+                key={num}
+                x={pos.x}
+                y={pos.y + 4}
+                textAnchor="middle"
+                className="fill-slate-800 text-sm font-medium"
+              >
+                {num}
+              </text>
+            );
+          })}
+        </>
+      )}
+      
+      {/* Minute markers */}
+      {Array.from({ length: 60 }).map((_, i) => {
+        if (i % 5 === 0) return null;
+        const angle = i * 6 - 90;
+        const inner = polarToCartesian(angle, radius - 8);
+        const outer = polarToCartesian(angle, radius - 3);
+        return (
+          <line
+            key={i}
+            x1={inner.x}
+            y1={inner.y}
+            x2={outer.x}
+            y2={outer.y}
+            stroke="#94a3b8"
+            strokeWidth="1"
+          />
+        );
+      })}
       
       {/* Hour hand */}
       <line
         x1={centerX}
         y1={centerY}
-        x2={hourX}
-        y2={hourY}
-        stroke="#333"
+        x2={hourHand.x}
+        y2={hourHand.y}
+        stroke="#1e293b"
         strokeWidth="4"
         strokeLinecap="round"
       />
@@ -103,29 +106,17 @@ export const Clock: React.FC<ClockProps> = ({
       <line
         x1={centerX}
         y1={centerY}
-        x2={minuteX}
-        y2={minuteY}
-        stroke="#333"
+        x2={minuteHand.x}
+        y2={minuteHand.y}
+        stroke="#1e293b"
         strokeWidth="3"
         strokeLinecap="round"
       />
       
       {/* Center dot */}
-      <circle cx={centerX} cy={centerY} r="5" fill="#dc2626" />
-      
-      {/* Time display */}
-      {showTime && (
-        <text
-          x={centerX}
-          y={size + 18}
-          textAnchor="middle"
-          fontSize="16"
-          fontWeight="bold"
-          fill="#333"
-        >
-          {formatTime()}
-        </text>
-      )}
+      <circle cx={centerX} cy={centerY} r="5" fill="#1e293b" />
     </svg>
   );
 };
+
+export default Clock;
