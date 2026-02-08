@@ -5,6 +5,41 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
+// Shuffle array - creates fresh copy every time
+export function shuffleArray<T>(arr: T[]): T[] {
+  const result = [...arr];
+  for (let i = result.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [result[i], result[j]] = [result[j], result[i]];
+  }
+  return result;
+}
+
+// Create distractors for multiple choice questions
+export function makeDistractors(correct: number, count: number = 3): number[] {
+  const d = new Set<number>();
+  const variations = [
+    correct + 1, correct - 1,
+    correct + 10, correct - 10,
+    correct * 2, Math.floor(correct / 2),
+    correct + 100, correct - 100,
+  ];
+  
+  for (const v of variations) {
+    if (v !== correct && v >= 0 && d.size < count) {
+      d.add(v);
+    }
+  }
+  
+  // Fill with more variations if needed
+  while (d.size < count) {
+    const v = correct + Math.floor(Math.random() * 100) - 50;
+    if (v !== correct && v >= 0) d.add(v);
+  }
+  
+  return Array.from(d).slice(0, count);
+}
+
 // UUID generator
 export function uuidv4(): string {
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {

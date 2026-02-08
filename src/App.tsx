@@ -22,6 +22,7 @@ import {
   Check, X, RotateCcw, Home, Trophy, Trash2, History 
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from './components/ui/dialog';
+import { BarGraph, ShapeDiagram, Spinner, MapDiagram, RotationShape } from './components/diagrams';
 
 type View = 'home' | 'test' | 'results' | 'review' | 'history';
 
@@ -223,6 +224,52 @@ export default function App() {
     ? `${Object.keys(savedTest.answers).length}/${savedTest.questions.length} answered, ${formatTime(savedTest.timeRemaining)} left`
     : '';
   
+  // Render diagram for questions that have them
+  const renderDiagram = (question: Question) => {
+    if (!question.diagram) return null;
+    
+    const { type, data } = question.diagram;
+    
+    switch (type) {
+      case 'bar-graph':
+        return (
+          <div className="my-6 flex justify-center">
+            <BarGraph 
+              data={data.data} 
+              title={data.title}
+              yAxisLabel={data.yAxisLabel}
+            />
+          </div>
+        );
+      case 'shape':
+        return (
+          <div className="my-6 flex justify-center">
+            <ShapeDiagram {...data} />
+          </div>
+        );
+      case 'spinner':
+        return (
+          <div className="my-6 flex justify-center">
+            <Spinner sections={data.sections} highlightNumber={data.highlightNumber} />
+          </div>
+        );
+      case 'map':
+        return (
+          <div className="my-6 flex justify-center">
+            <MapDiagram towns={data.towns} highlightedTowns={data.highlightedTowns} />
+          </div>
+        );
+      case 'rotation':
+        return (
+          <div className="my-6 flex justify-center">
+            <RotationShape shape={data.shape} rotation={data.rotation} direction={data.direction} />
+          </div>
+        );
+      default:
+        return null;
+    }
+  };
+  
   // Render functions
   const renderHome = () => (
     <div className="min-h-screen bg-gradient-to-b from-blue-50 to-white p-4 md:p-8">
@@ -357,6 +404,8 @@ export default function App() {
               </div>
               
               <p className="text-lg mb-6 whitespace-pre-line">{q.questionText}</p>
+              
+              {renderDiagram(q)}
               
               {q.answerFormat === 'multiple-choice' ? (
                 <div className="space-y-3">
