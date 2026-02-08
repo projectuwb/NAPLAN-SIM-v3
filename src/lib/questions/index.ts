@@ -45,12 +45,41 @@ function makeDistractors(correct: number, count: number = 3): number[] {
 }
 
 function formatOptions(options: (string | number)[], correct: string | number): { options: string[]; correctAnswer: string } {
-  const shuffled = shuffleArray(options.map(o => o.toString()));
+  // Remove duplicates while preserving order
+  const uniqueOptions = [...new Set(options.map(o => o.toString()))];
+  
+  // Ensure we have exactly 4 options (correct + 3 distractors)
+  // If we have fewer due to duplicates, add more distractors
+  const correctStr = correct.toString();
+  while (uniqueOptions.length < 4) {
+    const randomOffset = Math.floor(Math.random() * 20) - 10;
+    const num = parseInt(correctStr) || 0;
+    if (!isNaN(num) && num !== 0) {
+      const newDistractor = (num + randomOffset + uniqueOptions.length).toString();
+      if (!uniqueOptions.includes(newDistractor) && newDistractor !== correctStr) {
+        uniqueOptions.push(newDistractor);
+      }
+    } else {
+      // For non-numeric options, add generic placeholders
+      const extra = `Option ${uniqueOptions.length + 1}`;
+      if (!uniqueOptions.includes(extra)) {
+        uniqueOptions.push(extra);
+      }
+    }
+  }
+  
+  const shuffled = shuffleArray(uniqueOptions.slice(0, 4));
   const labels = ['A', 'B', 'C', 'D'];
-  const correctIndex = shuffled.indexOf(correct.toString());
+  const correctIndex = shuffled.indexOf(correctStr);
+  
+  // Ensure correct answer is in the list
+  if (correctIndex === -1) {
+    shuffled[0] = correctStr;
+  }
+  
   return {
     options: shuffled.map((o, i) => `${labels[i]}  ${o}`),
-    correctAnswer: labels[correctIndex],
+    correctAnswer: labels[correctIndex === -1 ? 0 : correctIndex],
   };
 }
 
@@ -410,9 +439,27 @@ function ratio(): Question {
   
   const gcd = (x: number, y: number): number => y === 0 ? x : gcd(y, x % y);
   const g = gcd(newA, newB);
-  const correct = `${newA / g} to ${newB / g}`;
-  const distractors = [`${a} to ${b}`, `${newA} to ${newB}`, `${newA + 1} to ${newB}`];
-  const { options, correctAnswer } = formatOptions([correct, ...distractors], correct);
+  const simpA = newA / g;
+  const simpB = newB / g;
+  const correct = `${simpA} to ${simpB}`;
+  
+  // Generate unique distractors
+  const distractors = [
+    `${a} to ${b}`, // original ratio
+    `${newA} to ${newB}`, // unsimplified ratio
+    `${simpA + 1} to ${simpB}`, // close but wrong
+  ].filter(d => d !== correct);
+  
+  // Add more distractors if needed
+  while (distractors.length < 3) {
+    const offset = distractors.length + 1;
+    const d = `${simpA} to ${simpB + offset}`;
+    if (!distractors.includes(d) && d !== correct) {
+      distractors.push(d);
+    }
+  }
+  
+  const { options, correctAnswer } = formatOptions([correct, ...distractors.slice(0, 3)], correct);
   
   return {
     id: uuidv4(),
